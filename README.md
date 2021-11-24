@@ -31,13 +31,14 @@ In the files there are aditional parameters that can be modified.
 
 ## Ab initio
 
-The algorithm defined in **AbInitioMC.py** can be run by `python Example.py`. All the necesary parameters are defined in **Example.py**.
-**Example.py** is set for the evaluation of Rényi entanglement entopy of one Hydrogen in realistic 2D potential.
-To change the directory on which results will be saved, modify `SAVETO` at the begining of **AbInitioMC.py**. Potential is defined in **AbInitioMC.py** and can be modified to suit ones needs.
+The algorithm defined in **AbInitioMC.py** can be used to compute Rényi entanglement entropy in *ab initio* analytic potentials. Realistic potentials are implemented only for 2D, but the program can be easily extended to higher dimension. Program can be run by calling.
+
+    python3 Example.py
 
 **Program requires `LEN` pocessors.**
 
-### Parameters
+All the necesary parameters are defined in **Example.py**. **Example.py** is set for the evaluation of Rényi entanglement entopy of one Hydrogen in realistic 2D potential. To change the directory on which results will be saved, modify `SAVETO` at the begining of **AbInitioMC.py**. Potential is defined in **AbInitioMC.py** and can be modified to suit ones needs.
+
 Parameters defined bellow can be modified, others are redundant, or shouldn't be modified.
 - `beta` - inverse temperature
 - `design` - $\zeta$ that we want (but can be modified, due to the min and max number of beads)
