@@ -69,8 +69,8 @@ def main(args):
         shift = [0, 0]
         partition1 = 0
         partition2 = 1
-        cle1 = (1 - cle) ** 6
-        cle2 = cle ** 6
+        cle1 = (1 - cle) ** 3
+        cle2 = cle ** 3
         
 
         NUMBER_OF_STEPS = 2 * 10 ** 9
