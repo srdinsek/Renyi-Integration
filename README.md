@@ -1,6 +1,6 @@
 # Renyi-Integration
 
-Calculations reported in the paper ["Rényi entanglement entropy in complex quantum systems"](https://journals.aps.org/prresearch/abstract/10.1103/PhysRevResearch.4.L032002) were performed using the rutines in this repository. First map contains programs for evaluation of Rényi entropy in the Ising model and the second one for the evaluation in *ab initio* model with arbitrary potential. 
+Calculations reported in the paper ["Rényi entanglement entropy in complex quantum systems"](https://doi.org/10.1103/PhysRevResearch.4.L032002) were performed using the rutines in this repository. First map contains programs for evaluation of Rényi entropy in the Ising model and the second one for the evaluation in *ab initio* model with arbitrary potential. 
 
 ## Ising model
 
