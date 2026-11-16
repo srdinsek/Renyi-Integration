@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-This code uses function CHQO_ND_Renyi() defined in AbInitioMC
+This code uses function run_renyi() defined in AbInitioMC
 for evaluation of Renyi entropy with metropolis algorithm. It measures
 the kinetic energy of springs that are varied along the path in
 thermodynamic integration.
 
 Task is parallelised, and each step along the path is evaluated
-using different processor. Number of steps is set by 2 * len(clex)
+using different processor. Number of steps is set by 2 * len(path_points)
 
 *************************************************************
-Make sure that number of processors is compatible with clex.
+Make sure that number of processors is compatible with path_points.
 *************************************************************
 
 The code is called by running the command
@@ -18,18 +18,19 @@ python3 Example.py
 
 in the terminal. The default parameters that I use are:
 
-        NUMBER_OF_STEPS = 2 * 10 ** 9
+        n_steps = 2 * 10 ** 9
         start = 10 ** 6
-        SEED = 11
-        CODE = 5
-        class_move_number = 100
-        SAMPLING_NUMBER = 1000
-        order = 2
+        random_seed = 11
+        sampling_offset = 5
+        reflection_interval = 100
+        sampling_interval = 1000
+        renyi_order = 2
 """
 
+import os
 import sys
 import numpy as np
-from AbInitioMC import CHQO_ND_Renyi
+from AbInitioMC import run_renyi, renyi_entropy
 from timeit import default_timer as timer
 from multiprocessing import Process
 import multiprocessing as mp
@@ -38,62 +39,78 @@ print("Number of processors: ", mp.cpu_count())
 def main(args):
     beta = 1050
     design = 10.0
-    NAME = 'lam6_doublew'
+    name = 'lam6_doublew'
+    saveto = './' # folder where the results are saved
     index = 0
-    LEN = 16
-    clex = np.linspace(0, 1, LEN)
+    n_points = 16
+    path_points = np.linspace(0, 1, n_points)
     m = 1836
-    # lam and omega are used only if POTENTIAL_TYPE='analytic'
-    lam = 1
+    # quartic and omega are used only if potential_type='analytic'
+    quartic = 1
     omega = 20
 
-    procesi = []
-    st = timer()
-    for cle in clex:
-        print('\n', cle)
+    processes = []
+    start_time = timer()
+    for lam in path_points:
+        print('\n', lam)
         zeta = beta / min(max(6, int(beta / design)), 300)
-        M = max(int(beta / zeta), 3)
-        zeta = beta / M
+        n_beads = max(int(beta / zeta), 3)
+        zeta = beta / n_beads
         epsilon = np.sqrt(zeta / m)
-        print('epsilon: ', epsilon, 'cle: ', cle)
-        print('old one: ', np.sqrt(beta), 'cle: ', cle)
+        print('epsilon: ', epsilon, 'lam: ', lam)
+        print('old one: ', np.sqrt(beta), 'lam: ', lam)
 
-        # These are used only if POTENTIAL_TYPE='analytic'
+        # These are used only if potential_type='analytic'
         #===============================
         gamma = m * omega ** 2
         mass = [[m / 2, 0], [0, m / 2]]
         mu = [[0, gamma], [gamma, 0]] # mu is divided by 2 in the program
-        lamda = [[lam, 0],[0, lam]]
+        lamda = [[quartic, 0],[0, quartic]]
         #===============================
 
         shift = [0, 0]
         partition1 = 0
         partition2 = 1
-        cle1 = (1 - cle) ** 3
-        cle2 = cle ** 3
+        lam1 = (1 - lam) ** 3
+        lam2 = lam ** 3
         
 
-        NUMBER_OF_STEPS = 2 * 10 ** 9
+        n_steps = 2 * 10 ** 9
         start = 10 ** 6
-        SEED = 11
-        CODE = 5
-        class_move_number = 100
-        SAMPLING_NUMBER = 1000
+        random_seed = 11
+        sampling_offset = 5
+        reflection_interval = 100
+        sampling_interval = 1000
         dimension=2
-        order = 2
-        procesi.append(Process(target=CHQO_ND_Renyi, args=(beta, zeta, cle1,
-                            order, mass, mu, lamda, shift, partition1,
-                            partition2, NUMBER_OF_STEPS, epsilon, start, SEED,
-                            CODE, SAMPLING_NUMBER, dimension, True, False,
-                            index, NAME, cle2, -10, 'realistic')))
+        renyi_order = 2 # only 2 is supported
+        # which grid of potentials.npy (and row of distances.npy) is used
+        real_index = 28
+        processes.append(Process(target=run_renyi, args=(beta, zeta, lam1,
+                            renyi_order, mass, mu, lamda, shift, partition1,
+                            partition2, n_steps, epsilon, start, random_seed,
+                            sampling_offset, sampling_interval, dimension,
+                            True, False, index, name, lam2, real_index,
+                            'realistic'),
+                            kwargs={'saveto': saveto,
+                                    'reflection_interval':
+                                    reflection_interval}))
         index += 1
 
-    for p in procesi:
+    for p in processes:
         p.start()
-    for p in procesi:
+    for p in processes:
         p.join()
-    en = timer()
-    print('TIME: ', en - st, '\n', flush=True)
+    end_time = timer()
+    print('TIME: ', end_time - start_time, '\n', flush=True)
+
+    # derivatives of the path weights lam1 = (1 - lam) ** 3, lam2 = lam ** 3
+    dlam1 = -3 * (1 - path_points) ** 2
+    dlam2 = 3 * path_points ** 2
+    entropy, error = renyi_entropy(saveto, name, path_points, dlam1, dlam2)
+    np.save(os.path.join(saveto, name + '_entropy'),
+            np.array([entropy, error]))
+    print('Renyi entropy S2 = ', entropy, ' +- ', error, ' (in units of',
+          'ln 2: ', entropy / np.log(2), ' +- ', error / np.log(2), ')')
 
 
 if __name__ == "__main__":

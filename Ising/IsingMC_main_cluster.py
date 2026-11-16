@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 This is Wolf cluster algorithm adapted for the computation of
-entanglement Renyi entropy in 1D Quantum Ising Model. It is 
-primarelly meant for the calculation of the second order 
+entanglement Renyi entropy in 1D Quantum Ising Model. It is
+primarelly meant for the calculation of the second order
 Renyi entropy, but it can be easily adapted for higher orders.
 
-Main function MontePath_Master, can be used for any (connected)
+Main function cluster_monte_carlo, can be used for any (connected)
 partition size and thermodynamic integration. Thus also for
 SWAP operator.
 
@@ -17,139 +17,144 @@ each of them running the same algorithm, but for different set of
 parameters and observables.
 
 This code was written for the pourpose of comparing the integration
-method to the SWAP method at large N.
+method to the SWAP method at large n_spins.
 
-The main algorithm strongly depends on subrutines defined in 
+The main algorithm strongly depends on subrutines defined in
 IsingMC_main_lib. It's performance is enhaced by the extensive
 use of numba's decorator @njit.
 """
 
+import os
 import numpy as np
-from numba import jit, njit
-from numpy.random import rand,randint,normal,uniform,seed
-import math
+from numba import njit
+from numpy.random import randint,seed
 
-from IsingMC_main_lib import EXPAND,observable,KineticAB
-
-SAVETO = '/scratchalpha/srdinsek/IsingModel/Ising_1D_Renyi/'
-# define the directory where results of 1) and 2) will be saved
+from IsingMC_main_lib import expand_cluster,observable,kinetic_ab
 
 
 @njit(error_model="numpy")
-def MontePath_Master(betaJ, zeta, N, r, InitialState, IS, NUMBER_OF_STEPS,
-                start, SAMPLING_NUMBER, CODE, RENYI_ORDER, partition2,
-                partition1, N_WALKERS, cle0, cle1, TYPE_OF_OBS_STR):
-    '''The algorithm was written with H = s^x_i s^x_{i+1} + r s^z_i  
+def cluster_monte_carlo(betaJ, zeta, n_spins, r, initial_state, initial_seed,
+                        n_steps, start, sampling_interval, sampling_offset,
+                        renyi_order, partition2, partition1, n_walkers,
+                        lam0, lam1, observable_type):
+    '''The algorithm was written with H = s^x_i s^x_{i+1} + r s^z_i
     in mind. Summ is over the i with periodic boundary conditions.
     Parameter ´partition1´ specifies the number of joint copies
     starting from i=0. Zero means there are none. Parameter
     ´partition2´ specifies the trial size starting from i=0. If
-    ´partition1´ is nonzero, then the trial size is 
+    ´partition1´ is nonzero, then the trial size is
     partition2 - partition1. Trial copies are the ones that we
     propose to SWAP or that we modify during the thermodynamic
     integration. For example function with parameters partition2,
     partition1=0 simulates split ensemble and modifies the
     subsystem spaning from i=0 to i=(partition2 - 1). The
-    function with parameters partition2=0, partition1 simulates 
+    function with parameters partition2=0, partition1 simulates
     ensemlbe, where copies spanning from i=0 to i=(partition1 - 1)
     are joined.
 
     Besides the cluster algorithm, the code uses also the
-    multiwalkers algorithm. Number of walkers is set by N_WALKERS.
+    multiwalkers algorithm. Number of walkers is set by n_walkers.
     '''
     # betaJ = inverse temperature
-    # zeta = betaJ / N_beads
-    # N = number of particles
+    # zeta = betaJ / n_beads
+    # n_spins = number of particles
     # r = strenght of the magnetic field
-    # InitialState = initial state (used only if IS != 0)
-    # IS = seed, but random state is used only if IS = 0
-    # NUMBER_OF_STEPS = number of clusters produced
+    # initial_state = initial state (used only if initial_seed != 0)
+    # initial_seed = seed, but random state is used only if initial_seed = 0
+    # n_steps = number of clusters produced
     # start = number of steps when sampling starts
-    # SAMPLING_NUMBER = frequency of sampling
-    # CODE = sampling phase shift. Usually set to 0
-    # RENYI_ORDER = order of Renyi entropy. Only 2 can be used
-    # N_WALKERS = number of independent walkers.
-    # cle0 = weight on the springs that fulfil the split copies
+    # sampling_interval = frequency of sampling
+    # sampling_offset = sampling phase shift. Usually set to 0
+    # renyi_order = order of Renyi entropy. Only 2 can be used
+    # n_walkers = number of independent walkers.
+    # lam0 = weight on the springs that fulfil the split copies
     # boundary condition
-    # cle1 = weight on the sping joining two copies.
-    # TYPE_OF_OBS_STR = either 'integral' or 'ratio' - specifies
+    # lam1 = weight on the sping joining two copies.
+    # observable_type = either 'integral' or 'ratio' - specifies
     # the observables that we want to sample - energy or SWAP.
 
-    if TYPE_OF_OBS_STR == 'integral':
+    if observable_type == 'integral':
 
-        TYPE_OF_OBS = 0
+        observable_id = 0
 
-    if TYPE_OF_OBS_STR == 'ratio':
+    if observable_type == 'ratio':
 
-        TYPE_OF_OBS = 1
+        observable_id = 1
 
     # Because clusters are biger at small r, we
-    # make less moves
+    # make less moves. Hence n_steps given as argument is multiplied
+    # by 60 for r > 3 and by 10 for 1 < r <= 3, and the sampling
+    # interval is set to 10 for r < 1.
     if r > 3:
-        NUMBER_OF_STEPS = NUMBER_OF_STEPS * 60
+        n_steps = n_steps * 60
     elif r > 1:
-        NUMBER_OF_STEPS = NUMBER_OF_STEPS * 10
+        n_steps = n_steps * 10
     elif r < 1:
-        SAMPLING_NUMBER = 10
+        sampling_interval = 10
 
-    # zeta is redefined, so that M is indeed an integer
-    M = int(betaJ / zeta)
-    print('M : ', M)
-    zeta = betaJ / M
+    # zeta is redefined, so that n_beads is indeed an integer
+    n_beads = int(betaJ / zeta)
+    print('M : ', n_beads)
+    zeta = betaJ / n_beads
 
     # Constants used in cluster algorithm
-    ch, sh = np.cosh(betaJ * r / M), np.sinh(betaJ * r / M)
-    const = np.log(1 / np.tanh(betaJ * r / M)) / 2
-    pK = 1 - np.exp(-2 * const) # link in imaginary-time dir. - "kinetic"
-    pP = 1 - np.exp(-2 * betaJ / M) # link along the bead - "potential"
-    pK1 = 1 - np.exp(-2 * const * cle0) # link1 in imag.-time at the boundary
-    pK2 = 1 - np.exp(-2 * const * cle1) # link2 in imag.-time at the boundary
-    TIME = 2 * M # assumed RENYI_ORDER = 2
-    FULLSIZE = 2 * M * N # assumed RENYI_ORDER = 2
-    print(ch, sh, const)
+    ch, sh = np.cosh(betaJ * r / n_beads), np.sinh(betaJ * r / n_beads)
+    time_coupling = np.log(1 / np.tanh(betaJ * r / n_beads)) / 2
+    # link in imaginary-time dir. - "kinetic"
+    p_time = 1 - np.exp(-2 * time_coupling)
+    # link along the bead - "potential"
+    p_space = 1 - np.exp(-2 * betaJ / n_beads)
+    # link1 in imag.-time at the boundary
+    p_boundary1 = 1 - np.exp(-2 * time_coupling * lam0)
+    # link2 in imag.-time at the boundary
+    p_boundary2 = 1 - np.exp(-2 * time_coupling * lam1)
+    # only renyi_order = 2 is supported
+    n_slices = renyi_order * n_beads
+    n_sites = renyi_order * n_beads * n_spins
+    print(ch, sh, time_coupling)
 
     # initial state for each walker
-    if IS > 0:
-        seed(IS)
-        state = InitialState.astype(np.bool_)
+    if initial_seed > 0:
+        seed(initial_seed)
+        state = initial_state.astype(np.bool_)
     else:
         seed(0)
-        state = randint(0, 2, (N_WALKERS, N, 2 * M)).astype(np.bool_)
+        state = randint(0, 2, (n_walkers, n_spins,
+                               n_slices)).astype(np.bool_)
 
     # counts number of sample points for each walker
-    n_used = np.zeros(N_WALKERS, dtype=np.int64)
+    n_used = np.zeros(n_walkers, dtype=np.int64)
 
     # averages of observables
-    exp = np.zeros((N_WALKERS), dtype=np.int64) # number of accepted moves
-    T0_avg = np.zeros((N_WALKERS), dtype=np.float64)
-    T1_avg = np.zeros((N_WALKERS), dtype=np.float64)
-    Ratio = np.zeros((N_WALKERS), dtype=np.float64) #SWAP
-    Ratio_two = np.zeros((N_WALKERS), dtype=np.float64)
+    # number of accepted moves
+    n_accepted = np.zeros((n_walkers), dtype=np.int64)
+    T0_avg = np.zeros((n_walkers), dtype=np.float64)
+    T1_avg = np.zeros((n_walkers), dtype=np.float64)
+    swap_avg = np.zeros((n_walkers), dtype=np.float64) #SWAP
+    swap_min_avg = np.zeros((n_walkers), dtype=np.float64)
 
     # full observables
-    T0_all = np.zeros((N_WALKERS,
-          (NUMBER_OF_STEPS - start) // SAMPLING_NUMBER), dtype=np.float64)
-    T1_all = np.zeros((N_WALKERS,
-          (NUMBER_OF_STEPS - start) // SAMPLING_NUMBER), dtype=np.float64)
-    Ratio_all = np.zeros((N_WALKERS,
-          (NUMBER_OF_STEPS - start) // SAMPLING_NUMBER), dtype=np.float64)
-    Ratio_two_all = np.zeros((N_WALKERS,
-          (NUMBER_OF_STEPS - start) // SAMPLING_NUMBER), dtype=np.float64)
+    T0_samples = np.zeros((n_walkers,
+          (n_steps - start) // sampling_interval), dtype=np.float64)
+    T1_samples = np.zeros((n_walkers,
+          (n_steps - start) // sampling_interval), dtype=np.float64)
+    swap_samples = np.zeros((n_walkers,
+          (n_steps - start) // sampling_interval), dtype=np.float64)
+    swap_min_samples = np.zeros((n_walkers,
+          (n_steps - start) // sampling_interval), dtype=np.float64)
 
     # some arrays that help reducing memorry used
-    q = np.zeros((2 * M), dtype=np.bool_)
-    CLUSTER_indi = np.zeros((N_WALKERS, FULLSIZE, 2), dtype=np.int64)
-    CLUSTER_name = np.zeros((N_WALKERS, FULLSIZE), dtype=np.int64)
-    POCKET = np.zeros((N_WALKERS, FULLSIZE), dtype=np.int64)
+    cluster_sites = np.zeros((n_walkers, n_sites, 2), dtype=np.int64)
+    cluster_ids = np.zeros((n_walkers, n_sites), dtype=np.int64)
+    pocket = np.zeros((n_walkers, n_sites), dtype=np.int64)
 
     # Parameters used for the cluster algortihm
-    DE = 0
-    AVSIZ = 0
+    total_cluster_size = 0
 
     # We start the Metropolis loop
-    for step in range(NUMBER_OF_STEPS):
+    for step in range(n_steps):
         # Each walker is treated separately
-        for walker in range(N_WALKERS):
+        for walker in range(n_walkers):
 
             ''' We construct the new move. '''
             #-------------------------------------------
@@ -157,190 +162,186 @@ def MontePath_Master(betaJ, zeta, N, r, InitialState, IS, NUMBER_OF_STEPS,
             #-------------------------------------------
 
             # randomly choosen starting spin at position (n, m)
-            n = randint(0, N)
-            m = randint(0, TIME)
-            
+            n = randint(0, n_spins)
+            m = randint(0, n_slices)
+
             # empty the array
-            CLUSTER_indi.fill(0)
+            cluster_sites.fill(0)
 
             # add the spin (n, m) to the cluster
-            CLUSTER_indi[walker, 0, 0] = n
-            CLUSTER_indi[walker, 0, 1] = m
+            cluster_sites[walker, 0, 0] = n
+            cluster_sites[walker, 0, 1] = m
 
             # add the spin (n, m) to the pocket in number format
-            POCKET[walker, 0] = m + n * TIME
-            
+            pocket[walker, 0] = m + n * n_slices
+
             # save the position in a number format
-            CLUSTER_name[walker, 0] = m + n * TIME
+            cluster_ids[walker, 0] = m + n * n_slices
 
             # size of the pocket
-            SIZE = 1
+            pocket_size = 1
             # size of the cluster
-            SIZE_C = 1
+            cluster_size = 1
 
             # loop over the pocket until it is empty
-            while SIZE > 0:
+            while pocket_size > 0:
                 # read the position of the last spin in the pocket
-                n = POCKET[walker, SIZE - 1] // TIME
-                m = POCKET[walker, SIZE - 1] % TIME
+                n = pocket[walker, pocket_size - 1] // n_slices
+                m = pocket[walker, pocket_size - 1] % n_slices
 
                 # Check the neighbors of the spin from the pocket
                 # and add them to the cluster with the physical
-                # probabilities with the function EXPAND()
-                SIZE_C, POCKET[walker], SIZE,\
-                CLUSTER_indi[walker], CLUSTER_name[walker] = EXPAND(N, M,
-                              TIME, const, pP, pK, pK1, pK2, partition1,
-                              partition2, state[walker], POCKET[walker],
-                              CLUSTER_indi[walker], SIZE, SIZE_C, n, m,
-                              CLUSTER_name[walker])
+                # probabilities with the function expand_cluster()
+                cluster_size, pocket[walker], pocket_size,\
+                cluster_sites[walker], cluster_ids[walker] = expand_cluster(
+                              n_spins, n_beads, n_slices, time_coupling,
+                              p_space, p_time, p_boundary1, p_boundary2,
+                              partition1, partition2, state[walker],
+                              pocket[walker], cluster_sites[walker],
+                              pocket_size, cluster_size, n, m,
+                              cluster_ids[walker])
                 # The used spin is removed from the pocket, but
                 # the new ones are added. They are added also
-                # to CLUSTER_indi
+                # to cluster_sites
 
             # Flip the cluster
-            # state[walker] = np.abs(state[walker] - CLUSTER[walker]) # slow
-            for i in range(SIZE_C):
-                n, m = CLUSTER_indi[walker, i, 0], CLUSTER_indi[walker, i, 1]
+            for i in range(cluster_size):
+                n, m = cluster_sites[walker, i, 0], cluster_sites[walker, i, 1]
                 state[walker, n, m] = not state[walker, n, m]
             # every step is accepted
-            exp[walker] += 1
-            AVSIZ += SIZE_C
+            n_accepted[walker] += 1
+            total_cluster_size += cluster_size
 
             ''' Here we meassure our observable. '''
-            if step % SAMPLING_NUMBER == CODE and step > start:
-                if TYPE_OF_OBS == 0:
+            if step % sampling_interval == sampling_offset and step > start:
+                if observable_id == 0:
 
                     # we record the energy of the spings along the path
-                    T0, T1 = observable(N, M, const,
+                    T0, T1 = observable(n_spins, n_beads, time_coupling,
                                     partition1, partition2, state[walker])
                     T0_avg[walker] += T0
                     T1_avg[walker] += T1
-                    T0_all[walker, n_used[walker]] += T0
-                    T1_all[walker, n_used[walker]] += T1
+                    T0_samples[walker, n_used[walker]] += T0
+                    T1_samples[walker, n_used[walker]] += T1
 
                     n_used[walker] += 1
 
-                if TYPE_OF_OBS == 1:
+                if observable_id == 1:
 
                     # we evaluate the SWAP operator
-                    if cle0 == 0:
-                        Kq_new = KineticAB(N, M, ch, sh, partition1,
-                                            partition2, state[walker])
-                        DGRANDE = KineticAB(N, M, ch, sh,
+                    if lam0 == 0:
+                        K_ab = kinetic_ab(n_spins, n_beads, ch, sh,
+                                          partition1, partition2,
+                                          state[walker])
+                        swap_ratio = kinetic_ab(n_spins, n_beads, ch, sh,
                                             partition2, partition1,
-                                                state[walker]) / Kq_new
-                        DGRANDE = 1 / DGRANDE
+                                                state[walker]) / K_ab
+                        swap_ratio = 1 / swap_ratio
                     else:
-                        Kq_new = KineticAB(N, M, ch, sh, partition1,
-                                           partition2, state[walker])
-                        DGRANDE = KineticAB(N, M, ch, sh, partition2,
-                                       partition1, state[walker]) / Kq_new
+                        K_ab = kinetic_ab(n_spins, n_beads, ch, sh,
+                                          partition1, partition2,
+                                          state[walker])
+                        swap_ratio = kinetic_ab(n_spins, n_beads, ch, sh,
+                                       partition2, partition1,
+                                       state[walker]) / K_ab
                     # Perhaps this one should not be optimized
-                    Ratio_two[walker] += np.min(np.array([1, DGRANDE]))
-                    Ratio[walker] += DGRANDE
-                    Ratio_two_all[walker, n_used[walker]]\
-                                        += np.min(np.array([1, DGRANDE]))
-                    Ratio_all[walker, n_used[walker]] += DGRANDE
+                    swap_min_avg[walker] += np.min(np.array([1, swap_ratio]))
+                    swap_avg[walker] += swap_ratio
+                    swap_min_samples[walker, n_used[walker]]\
+                                        += np.min(np.array([1, swap_ratio]))
+                    swap_samples[walker, n_used[walker]] += swap_ratio
 
                     n_used[walker] += 1
 
-    print(exp / NUMBER_OF_STEPS) # all of them should be accepted!
+    print(n_accepted / n_steps) # all of them should be accepted!
     print('av size of cluster: ',
-                        AVSIZ / NUMBER_OF_STEPS / N_WALKERS)
-    if TYPE_OF_OBS == 0:
-        return state, T0_all, T1_all, T0_avg / n_used, T1_avg / n_used
-    if TYPE_OF_OBS == 1:
-        return state, Ratio_two_all, Ratio_all,\
-                              Ratio_two / n_used, Ratio / n_used
+                        total_cluster_size / n_steps / n_walkers)
+    if observable_id == 0:
+        return state, T0_samples, T1_samples, T0_avg / n_used,\
+                              T1_avg / n_used
+    if observable_id == 1:
+        return state, swap_min_samples, swap_samples,\
+                              swap_min_avg / n_used, swap_avg / n_used
 
 
-def MAIN_integral(betaJ, zeta, N, r, NUMBER_OF_STEPS, start,
-                    SAMPLING_NUMBER, CODE, RENYI_ORDER, partition2,
-                            partition1, N_WALKERS, cle0, cle1, qq, index):
+def run_integral(betaJ, zeta, n_spins, r, n_steps, start,
+                    sampling_interval, sampling_offset, renyi_order,
+                    partition2, partition1, n_walkers, lam0, lam1, queue,
+                    index, saveto):
    '''This is an example of how one should run the code for
    the thermodynamic integration. In our calculations this function
    is called many times in parallel and hence results and parameters
-   are collected and saved in qq'''
+   are collected and saved in queue'''
 
-   InitialState, IS = np.zeros((5, 5, 5), dtype=np.bool_), 0
-   rezultat = MontePath_Master(betaJ, zeta, N, r, InitialState, IS,
-                      NUMBER_OF_STEPS, start, SAMPLING_NUMBER, CODE,
-                      RENYI_ORDER, partition2, partition1, N_WALKERS,
-                      cle0, cle1, TYPE_OF_OBS_STR = 'integral')
-   
-   np.save(SAVETO + 'T0all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
-            + 'r_' + str(r) + '_N_' + str(N) + '_cle0_' + str(cle0)\
-            + '_cle1_' + str(cle1) + '_integral_Part_' + str(partition2)\
-            + '_' + str(partition1), rezultat[-4])
-   np.save(SAVETO + 'T1all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
-            + 'r_' + str(r) + '_N_' + str(N) + '_cle0_' + str(cle0)\
-            + '_cle1_' + str(cle1) + '_integral_Part_' + str(partition2)\
-            + '_' + str(partition1), rezultat[-3])
-   
+   initial_state, initial_seed = np.zeros((5, 5, 5), dtype=np.bool_), 0
+   result = cluster_monte_carlo(betaJ, zeta, n_spins, r, initial_state,
+                      initial_seed, n_steps, start, sampling_interval,
+                      sampling_offset, renyi_order, partition2, partition1,
+                      n_walkers, lam0, lam1, observable_type = 'integral')
 
-   qq.put((index, cle0, cle1, rezultat[-2], rezultat[-1]))
-   return rezultat[-2], rezultat[-1]
+   tag = ('betaJ_' + str(betaJ) + 'zeta_' + str(zeta) + 'r_' + str(r)
+          + '_N_' + str(n_spins) + '_cle0_' + str(lam0) + '_cle1_'
+          + str(lam1) + '_integral_Part_' + str(partition2) + '_'
+          + str(partition1))
+   np.save(os.path.join(saveto, 'T0all_' + tag), result[-4])
+   np.save(os.path.join(saveto, 'T1all_' + tag), result[-3])
+
+   queue.put((index, lam0, lam1, result[-2], result[-1]))
+   return result[-2], result[-1]
 
 
-def MAIN_ratio(betaJ, zeta, N, r, NUMBER_OF_STEPS, start,
-                    SAMPLING_NUMBER, CODE, RENYI_ORDER, partition2,
-                                          partition1, N_WALKERS, qq, index):
+def run_ratio(betaJ, zeta, n_spins, r, n_steps, start,
+                    sampling_interval, sampling_offset, renyi_order,
+                    partition2, partition1, n_walkers, queue, index, saveto):
    '''This is an example of how one should run the code for
    the evaluatoin of SWAP. In our calculations this function
    is called many times in parallel and hence results and parameters
-   are collected and saved in qq. Notice that MontePath_Master() is
+   are collected and saved in queue. Notice that cluster_monte_carlo() is
    called two times!'''
 
-   InitialState, IS = np.zeros((5, 5, 5), dtype=np.bool_), 0
-   rezultat1 = MontePath_Master(betaJ, zeta, N, r, InitialState, IS,
-                      NUMBER_OF_STEPS, start, SAMPLING_NUMBER, CODE,
-                      RENYI_ORDER, partition2, partition1, N_WALKERS,
-                      0, 1, TYPE_OF_OBS_STR = 'ratio')
-   rezultat2 = MontePath_Master(betaJ, zeta, N, r, InitialState, IS,
-                      NUMBER_OF_STEPS, start, SAMPLING_NUMBER, CODE,
-                      RENYI_ORDER, partition2, partition1, N_WALKERS,
-                      1, 0, TYPE_OF_OBS_STR = 'ratio')
+   initial_state, initial_seed = np.zeros((5, 5, 5), dtype=np.bool_), 0
+   result1 = cluster_monte_carlo(betaJ, zeta, n_spins, r, initial_state,
+                      initial_seed, n_steps, start, sampling_interval,
+                      sampling_offset, renyi_order, partition2, partition1,
+                      n_walkers, 0, 1, observable_type = 'ratio')
+   result2 = cluster_monte_carlo(betaJ, zeta, n_spins, r, initial_state,
+                      initial_seed, n_steps, start, sampling_interval,
+                      sampling_offset, renyi_order, partition2, partition1,
+                      n_walkers, 1, 0, observable_type = 'ratio')
 
-   np.save(SAVETO + 'BOL0all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
-            + 'r_' + str(r) + '_N_' + str(N) + '_ratio_Part_'\
-            + str(partition2) + '_' + str(partition1), rezultat1[-4])
-   np.save(SAVETO + 'BOL1all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
-            + 'r_' + str(r) + '_N_' + str(N) + '_ratio_Part_'\
-            + str(partition2) + '_' + str(partition1), rezultat2[-4])
-   np.save(SAVETO + 'MET0all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
-            + 'r_' + str(r) + '_N_' + str(N) + '_ratio_Part_'\
-            + str(partition2) + '_' + str(partition1), rezultat1[-3])
-   np.save(SAVETO + 'MET1all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
-            + 'r_' + str(r) + '_N_' + str(N) + '_ratio_Part_'\
-            + str(partition2) + '_' + str(partition1), rezultat2[-3])
+   tag = ('betaJ_' + str(betaJ) + 'zeta_' + str(zeta) + 'r_' + str(r)
+          + '_N_' + str(n_spins) + '_ratio_Part_' + str(partition2) + '_'
+          + str(partition1))
+   for prefix, samples in [('BOL0all_', result1[-4]),
+                           ('BOL1all_', result2[-4]),
+                           ('MET0all_', result1[-3]),
+                           ('MET1all_', result2[-3])]:
+      np.save(os.path.join(saveto, prefix + tag), samples)
 
-
-   qq.put((partition1, rezultat1[-2], rezultat2[-2],
-                                        rezultat1[-1], rezultat2[-1]))
-   return rezultat1[-1], rezultat2[-1]
+   queue.put((partition1, result1[-2], result2[-2],
+                                        result1[-1], result2[-1]))
+   return result1[-1], result2[-1]
 
 
 
 # This is a very fast run and in here to compile numba before
-# the run. 
+# the run.
 betaJ = 1
 zeta = betaJ / 5 # number of beads is 5
-N = 4
+n_spins = 4
 r = 0.1
-NUMBER_OF_STEPS = 10 ** 3
+n_steps = 10 ** 3
 start = 10 ** 2
-SAMPLING_NUMBER = 10
-CODE = 0
-N_WALKERS = 1
-RENYI_ORDER = 2
+sampling_interval = 10
+sampling_offset = 0
+n_walkers = 1
+renyi_order = 2
 partition1 = 0
 partition2 = 2
-cle0, cle1 = 1, 0
-TYPE_OF_OBS = 'integral'
-InitialState, IS = np.zeros((5, 5, 5), dtype=np.bool_), 0
-ruru = MontePath_Master(betaJ, zeta, N, r, InitialState, IS, 
-                      NUMBER_OF_STEPS, start, SAMPLING_NUMBER,
-                      CODE, RENYI_ORDER, partition2, partition1,
-                      N_WALKERS, cle0, cle1, TYPE_OF_OBS)
-
-
+lam0, lam1 = 1, 0
+observable_type = 'integral'
+initial_state, initial_seed = np.zeros((5, 5, 5), dtype=np.bool_), 0
+warmup = cluster_monte_carlo(betaJ, zeta, n_spins, r, initial_state,
+                      initial_seed, n_steps, start, sampling_interval,
+                      sampling_offset, renyi_order, partition2, partition1,
+                      n_walkers, lam0, lam1, observable_type)

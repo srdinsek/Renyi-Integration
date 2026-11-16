@@ -4,7 +4,7 @@ Created on Wed Mar 10 15:12:04 2021
 
 @author: Miha
 
-In this program function CHQO_ND_Renyi() is defined. It can be used to
+In this program function run_renyi() is defined. It can be used to
 evaluate Rényi entropy of second order for any system of distinguishable
 particles in analytical potential. Although the ergodicity of the sampling
 is not guaranteed. It is primarelly meant for the calculation of the
@@ -16,86 +16,87 @@ It's performance is enhaced by the extensive use of numba's decorator
 @njit, but at the same time numba restricts us with it limitations.
 
 It is important to define:
-SAVETO - where to save the results
+saveto - where to save the results (argument of run_renyi)
 POTLOC - if realistic potential is used, it's address
 DISLOC - if realistic potential is used, the address of it's grid
 
 """
 
 import numpy as np
-import numba
-from numba import jit, njit
-from numpy.random import rand,randint,normal,uniform,seed,permutation
+from numba import njit
+from numpy.random import rand,randint,normal,uniform,seed
 import os
-import math
 import pickle
+from scipy import integrate
 from scipy.interpolate import bisplrep, bisplev
 
-SAVETO = '/scratchalpha/srdinsek/HarmonicOscillator/CHQO_ND_Renyi'
-POTLOC = "potentials.npy"
-DISLOC = "distances.npy"
+HERE = os.path.dirname(os.path.abspath(__file__))
+POTLOC = os.path.join(HERE, "potentials.npy")
+DISLOC = os.path.join(HERE, "distances.npy")
 
 @njit(error_model="numpy")
-def InitialEnergy(baza, b, b2, v1, v2, M, partition1, partition2,
-                            mass, mu, lamda, A, B, potential, coor, dk,
-                                                cle1, cle2, c1, c2, POT_CORR):
+def initial_energy(path, b, b2, v1, v2, n_beads, partition1, partition2,
+                   mass, mu, lamda, potential_kind, potential, coor, dk,
+                   lam1, lam2, c1, c2, potential_correction):
     '''This function evaluates full energy at the begining of the
     MC simulation. '''
-                                 
+
     kinetic_part1, kinetic_part2, V = 0, 0, 0
-    for i in range(len(baza[0])):
+    for i in range(len(path[0])):
         b.fill(0)
         b2.fill(0)
         v1.fill(0)
         v2.fill(0)
-        b += baza[:, i]
-        b2 += baza[:, (i-1) % M + M * (i // M)]
-        b2[:partition1] = baza[:partition1, i - 1]
+        b += path[:, i]
+        b2 += path[:, (i-1) % n_beads + n_beads * (i // n_beads)]
+        b2[:partition1] = path[:partition1, i - 1]
         v1 += (b - b2)
-        b2[partition1 :partition2] = baza[partition1 :partition2, i - 1]
+        b2[partition1 :partition2] = path[partition1 :partition2, i - 1]
         v2 += (b - b2)
-        if i % M == 0:
+        if i % n_beads == 0:
            # this if statement was added in 26.4.2021
-           kinetic_part1 += (v1 @ mass @ (v1 * cle1))
-           kinetic_part1 += (v2 @ mass @ (v2 * cle2))
+           kinetic_part1 += (v1 @ mass @ (v1 * lam1))
+           kinetic_part1 += (v2 @ mass @ (v2 * lam2))
         else:
-           # kinetic_part1 += (v1 @ mass @ v1)
            # we can use only one, since they must be equal
            # alternatively one could multiply one wiht lambda
            # and another one with (1 - lambda)
            kinetic_part1 += (v2 @ mass @ v2)
-        
-        # This terms is used ony if POT_CORR == True
-        if i % M == 0 and POT_CORR == True:
-           V += V_standard(b, mu, lamda, A, B, potential, coor, dk) / 2
 
-           b[:partition1] = baza[:partition1, i - M]
-           V += V_standard(b, mu, lamda, A, B,
+        # This terms is used ony if potential_correction == True
+        if i % n_beads == 0 and potential_correction == True:
+           V += potential_energy(b, mu, lamda, potential_kind,
+                                 potential, coor, dk) / 2
+
+           b[:partition1] = path[:partition1, i - n_beads]
+           V += potential_energy(b, mu, lamda, potential_kind,
                            potential, coor, dk) / 2 * c1
 
-           b[partition1 :partition2] = baza[partition1 :partition2, i - M]
-           V += V_standard(b, mu, lamda, A, B,
+           b[partition1 :partition2] = path[partition1 :partition2,
+                                            i - n_beads]
+           V += potential_energy(b, mu, lamda, potential_kind,
                            potential, coor, dk) / 2 * c2
         else:
-           V += V_standard(b, mu, lamda, A, B, potential, coor, dk)
-    K1 = kinetic_part1 # / 2
+           V += potential_energy(b, mu, lamda, potential_kind,
+                                 potential, coor, dk)
+    K1 = kinetic_part1
     K2 = kinetic_part2
     E01 = K1 + V
     E02 = K2 + V
     return V, K1, K2, E01, E02
 
 @njit(error_model="numpy")
-def V_standard(vector, mu, lamda, A, B, potential, coor, dk):
+def potential_energy(vector, mu, lamda, potential_kind, potential, coor, dk):
     '''Potential energy of the configuration. This function can be
     changed baased on the needs.'''
 
-    if A == 0:
+    if potential_kind == 0:
         # Analytical potential. This one is written for x^4
         square = vector ** 2
         general = vector @ mu @ vector / 2 + (square @ lamda @ square)
         return general
 
-    if A == 1:
+    if potential_kind == 1:
         # Linear interpolation, for 2D potential. It is written
         # like this, because there are no rutines in numbe for
         # splines.
@@ -134,18 +135,19 @@ def V_standard(vector, mu, lamda, A, B, potential, coor, dk):
         return general / dk
 
 @njit(error_model="numpy")
-def multi(mat, vec, cle):
-   '''Just multiplication with weight cle on one side. '''
+def multi(mat, vec, weight):
+   '''Just multiplication with weight on one side. '''
    #this thing works only if mat is diagonal. If mat is not diagonal
    # then we should multiply both sides!
-   return vec @ mat @ (vec * cle)
+   return vec @ mat @ (vec * weight)
 
 @njit(error_model="numpy")
-def functionND_copies_dc(beta, zeta, cle1, cle2, order, mass, mu, lamda,
-                      shift, partition1, partition2, NUMBER_OF_STEPS, epsilon,
-                      start, SEED, CODE, SAMPLING_NUMBER, state, potential,
-                      coor, dk, dimension=1, memory=False, position=False,
-                      RandomState=True):
+def sample_replicas(beta, zeta, lam1, lam2, renyi_order, mass, mu, lamda,
+                    shift, partition1, partition2, n_steps, epsilon,
+                    start, random_seed, sampling_offset, sampling_interval,
+                    state, potential, coor, dk, dimension=1, memory=False,
+                    position=False, random_state=True, potential_kind=1,
+                    reflection_interval=100):
     '''This is the function that simulates the ensembles that gives
     the Rényi entanglement entropy. Parameter ´partition1´ specifies
     the number of joint copies starting from particle 0. Zero means there
@@ -157,19 +159,22 @@ def functionND_copies_dc(beta, zeta, cle1, cle2, order, mass, mu, lamda,
     and modifies the subsystem spaning from particle 0 to particle
     (partition2 - 1). The function with parameters partition2=0, partition1
     simulates ensemlbe, where copies spanning from particle 0 to particle
-    (partition1 - 1) are joined.'''
-    
-    # zeta - beta / M
+    (partition1 - 1) are joined. Parameter ´potential_kind´ selects the
+    potential: 0 for analytic, 1 for realistic 2D (linear interpolation).
+    Every reflection_interval steps the reflection of the replica is
+    proposed instead of a single-bead move. Only renyi_order = 2 is
+    supported.'''
+
+    # zeta - beta / n_beads
     # epsilon - define the variance of random numbers
     # mu, lamda and mass are matrices, that set the interaction
     # between the particles.
     # The interaction in the imaginary-time direciton is default, while the
     # potential energy can be made arbitrary by changing the function
-    # V_standard. In imaginary-time direction only the nearest neighbours can
-    # interact.
+    # potential_energy. In imaginary-time direction only the nearest
+    # neighbours can interact.
     # The copies don't appear as separate subarrays, but are simply padded, so
-    # that effective $M$ is $M * alpha$, where $alpha$ is the order of
-    # Renyi entropy.
+    # that effective number of beads is n_beads * renyi_order.
     # memory and position declare if we want to recorde history
     # of measurements.
 
@@ -177,46 +182,43 @@ def functionND_copies_dc(beta, zeta, cle1, cle2, order, mass, mu, lamda,
     # Constants and some arrays
     #-------------------------------------------
 
-    POT_CORR = False
-    A, B = 1, 4 * 40 * 0.1 ** 6
-    epsilon_class = 1 / epsilon
-    M = max(int(beta / zeta), 3)
-    LENGHT = M * order
-    print('M : ', M)
-    zeta = beta / M
-    c1 = cle1
-    cle1 = np.ones(dimension, dtype=np.float64) / 2
-    cle1[:partition2] = cle1[:partition2] * c1 * 2
-    cle1[:partition1] = np.zeros(partition1, dtype=np.float64)
-    c2 = cle2
-    cle2 = np.ones(dimension, dtype=np.float64) / 2
-    cle2[:partition2] = cle2[:partition2] * c2 * 2
-    cle2[:partition1] = np.ones(partition1, dtype=np.float64)
+    potential_correction = False
+    n_beads = max(int(beta / zeta), 3)
+    path_length = n_beads * renyi_order
+    print('M : ', n_beads)
+    zeta = beta / n_beads
+    c1 = lam1
+    lam1 = np.ones(dimension, dtype=np.float64) / 2
+    lam1[:partition2] = lam1[:partition2] * c1 * 2
+    lam1[:partition1] = np.zeros(partition1, dtype=np.float64)
+    c2 = lam2
+    lam2 = np.ones(dimension, dtype=np.float64) / 2
+    lam2[:partition2] = lam2[:partition2] * c2 * 2
+    lam2[:partition1] = np.ones(partition1, dtype=np.float64)
 
     reflection_mask = np.zeros(dimension, dtype=np.float64)
     reflection_mask[:partition2] = np.ones(partition2, dtype=np.float64) * c2
     reflection_mask[:partition1] = np.ones(partition1, dtype=np.float64)
 
-    cle_mask = np.zeros(dimension, dtype=np.float64)
-    cle_mask[partition1 : partition2] = np.ones(partition2 - partition1,
+    lam_mask = np.zeros(dimension, dtype=np.float64)
+    lam_mask[partition1 : partition2] = np.ones(partition2 - partition1,
                                                             dtype=np.float64)
-    identiteta = np.ones(dimension, dtype=np.float64)
-    seed(SEED)
+    identity = np.ones(dimension, dtype=np.float64)
+    seed(random_seed)
     mu, lamda, mass = mu * zeta, lamda * zeta, mass / zeta
     # mu, lamad and mass are matrices
-    if M <= 2:
+    if n_beads <= 2:
         print('Change zeta, M is smaller or equal to 2!')
     else:
         # Initial state
-        if RandomState:
-            baza = normal(0, 1, (dimension, M * order))
+        if random_state:
+            path = normal(0, 1, (dimension, n_beads * renyi_order))
             for i in range(dimension):
-                baza[i] += shift[i]
+                path[i] += shift[i]
         else:
-            baza = np.copy(state)
+            path = np.copy(state)
 
         # Some arrays used during the calcualtion
-        baza_q = np.zeros((dimension, M * order), dtype=np.float64)
         b = np.zeros(dimension, dtype=np.float64)
         b2 = np.zeros(dimension, dtype=np.float64)
         v1 = np.zeros(dimension, dtype=np.float64)
@@ -225,167 +227,190 @@ def functionND_copies_dc(beta, zeta, cle1, cle2, order, mass, mu, lamda,
         #-------------------------------------------
         # Initial kinetic and potential energy
         #-------------------------------------------
-        V, K1, K2, E01, E02 = InitialEnergy(baza, b, b2, v1, v2, M,
+        V, K1, K2, E01, E02 = initial_energy(path, b, b2, v1, v2, n_beads,
                                          partition1, partition2, mass,
-                                         mu, lamda, A, B, potential,
-                                         coor, dk, cle1, cle2, c1, c2,
-                                         POT_CORR)
+                                         mu, lamda, potential_kind,
+                                         potential, coor, dk, lam1, lam2,
+                                         c1, c2, potential_correction)
 
         #-------------------------------------------
         # Arrays for storing the observables
         #-------------------------------------------
 
         if memory:
-            V_tot = np.zeros((NUMBER_OF_STEPS - start) // SAMPLING_NUMBER,
+            V_samples = np.zeros((n_steps - start) // sampling_interval,
                                                              dtype=np.float32)
-            K_tot = np.zeros((NUMBER_OF_STEPS - start) // SAMPLING_NUMBER,
+            K_samples = np.zeros((n_steps - start) // sampling_interval,
                                                              dtype=np.float32)
-            Ratio_tot = np.zeros((NUMBER_OF_STEPS - start) // SAMPLING_NUMBER,
+            ratio_samples = np.zeros((n_steps - start) // sampling_interval,
                                                              dtype=np.float32)
-            T0_tot = np.zeros((NUMBER_OF_STEPS - start) // SAMPLING_NUMBER,
+            T0_samples = np.zeros((n_steps - start) // sampling_interval,
                                                              dtype=np.float32)
-            T1_tot = np.zeros((NUMBER_OF_STEPS - start) // SAMPLING_NUMBER,
+            T1_samples = np.zeros((n_steps - start) // sampling_interval,
                                                              dtype=np.float32)
-            V0_tot = np.zeros((NUMBER_OF_STEPS - start) // SAMPLING_NUMBER,
+            V0_samples = np.zeros((n_steps - start) // sampling_interval,
                                                              dtype=np.float32)
-            V1_tot = np.zeros((NUMBER_OF_STEPS - start) // SAMPLING_NUMBER,
+            V1_samples = np.zeros((n_steps - start) // sampling_interval,
                                                              dtype=np.float32)
-            #E[0] = E0
         if position:
-            x = np.zeros(((NUMBER_OF_STEPS - start) // SAMPLING_NUMBER,
-                                      dimension, M * order), dtype=np.float32)
+            x = np.zeros(((n_steps - start) // sampling_interval,
+                          dimension, n_beads * renyi_order),
+                         dtype=np.float32)
 
-        n_excepted, n_used = 0, 0
+        n_accepted, n_used = 0, 0
         average_V, average_K1, average_ratio = 0, 0, 0
-        q = np.zeros((dimension, order), dtype=np.float64)
-        d = np.zeros((dimension, order), dtype=np.float64)
-        dp1 = np.zeros((dimension, order), dtype=np.float64)
-        dm1 = np.zeros((dimension, order), dtype=np.float64)
-        motnja = np.zeros((dimension, order), dtype=np.float64)
+        new_bead = np.zeros((dimension, renyi_order), dtype=np.float64)
+        old_bead = np.zeros((dimension, renyi_order), dtype=np.float64)
+        next_bead = np.zeros((dimension, renyi_order), dtype=np.float64)
+        previous_bead = np.zeros((dimension, renyi_order), dtype=np.float64)
+        displacement = np.zeros((dimension, renyi_order), dtype=np.float64)
         pot_q = np.zeros(dimension, dtype=np.float64)
         pot_d = np.zeros(dimension, dtype=np.float64)
 
         #-------------------------------------------
         # Metropolos loop (from here on numba is usefull)
         #-------------------------------------------
-        for step in range(1, NUMBER_OF_STEPS + 1):
+        for step in range(1, n_steps + 1):
 
             # Just slightly perturb one random bead
-            if step % 100 != 0:
-                motnja.fill(0)
+            if step % reflection_interval != 0:
+                displacement.fill(0)
 
                 # create perturbation for each copy
-                j = randint(0, M, order)
-                while (j[0] == 0 and j[1] == M - 1)\
-                        or (j[0] == M - 1 and j[1] == 0)\
+                j = randint(0, n_beads, renyi_order)
+                while (j[0] == 0 and j[1] == n_beads - 1)\
+                        or (j[0] == n_beads - 1 and j[1] == 0)\
                                 or (j[0] == 0 and j[1] == 0):
-                    j = randint(0, M, order)
+                    j = randint(0, n_beads, renyi_order)
 
                 # the perturbing vectors
-                motnja += uniform(-epsilon, epsilon, (dimension, order))# * q
+                displacement += uniform(-epsilon, epsilon,
+                                        (dimension, renyi_order))
 
                 # prepare quantities for the calculation
                 # and calculate the change in "energy"
                 dV, dK1 = 0, 0
                 # loop over the copies
-                for al in range(order):
+                for al in range(renyi_order):
                     jjj = j[al]
-                    jj = jjj + M * al
-                    
+                    jj = jjj + n_beads * al
+
                     # perturbed bead
-                    q[:, al] = baza[:, jj] + motnja[:, al]
+                    new_bead[:, al] = path[:, jj] + displacement[:, al]
                     # unperturbed one
-                    d[:, al] = baza[:, jj]
+                    old_bead[:, al] = path[:, jj]
                     # neighbouring beads
-                    dp1[:, al] = baza[:, (jjj + 1) % M + M * al]
-                    dm1[:, al] = baza[:, (jjj - 1) % M + M * al]
+                    next_bead[:, al] = path[:, (jjj + 1) % n_beads
+                                            + n_beads * al]
+                    previous_bead[:, al] = path[:, (jjj - 1) % n_beads
+                                                + n_beads * al]
 
                     #-------------------------------------------
                     # Change in the potential energy
                     #-------------------------------------------
-                    # Very simple if POT_CORR == False
-                    if jj % M == 0 and POT_CORR == True:
+                    # Very simple if potential_correction == False
+                    if jj % n_beads == 0 and potential_correction == True:
                        pot_q.fill(0)
                        pot_d.fill(0)
-                       dV += (V_standard(q[:, al], mu, lamda, A, B,
-                                            potential, coor, dk) \
-                            - V_standard(d[:, al], mu, lamda, A, B,
-                                            potential, coor, dk)) / 2
-                       pot_q += q[:, al]
-                       pot_d += d[:, al]
-                       pot_q[:partition1] = baza[:partition1, jj - M]
-                       pot_d[:partition1] = baza[:partition1, jj - M]
-                       dV += (V_standard(q[:, al], mu, lamda, A, B,
-                                            potential, coor, dk) \
-                            - V_standard(d[:, al], mu, lamda, A, B,
-                                            potential, coor, dk)) / 2 * c1
-                       pot_q[partition1 :partition2] = baza[
-                                                partition1 :partition2, jj - M]
-                       pot_d[partition1 :partition2] = baza[
-                                                partition1 :partition2, jj - M]
-                       dV += (V_standard(q[:, al], mu, lamda, A, B,
-                                            potential, coor, dk) \
-                            - V_standard(d[:, al], mu, lamda, A, B,
-                                            potential, coor, dk)) / 2 * c2
+                       dV += (potential_energy(new_bead[:, al], mu, lamda,
+                                    potential_kind, potential, coor, dk) \
+                            - potential_energy(old_bead[:, al], mu, lamda,
+                                    potential_kind, potential, coor,
+                                    dk)) / 2
+                       pot_q += new_bead[:, al]
+                       pot_d += old_bead[:, al]
+                       pot_q[:partition1] = path[:partition1, jj - n_beads]
+                       pot_d[:partition1] = path[:partition1, jj - n_beads]
+                       dV += (potential_energy(new_bead[:, al], mu, lamda,
+                                    potential_kind, potential, coor, dk) \
+                            - potential_energy(old_bead[:, al], mu, lamda,
+                                    potential_kind, potential, coor,
+                                    dk)) / 2 * c1
+                       pot_q[partition1 :partition2] = path[
+                                        partition1 :partition2, jj - n_beads]
+                       pot_d[partition1 :partition2] = path[
+                                        partition1 :partition2, jj - n_beads]
+                       dV += (potential_energy(new_bead[:, al], mu, lamda,
+                                    potential_kind, potential, coor, dk) \
+                            - potential_energy(old_bead[:, al], mu, lamda,
+                                    potential_kind, potential, coor,
+                                    dk)) / 2 * c2
                     else:
-                       dV += V_standard(q[:, al], mu, lamda, A, B,
-                                            potential, coor, dk) \
-                            - V_standard(d[:, al], mu, lamda, A, B,
-                                            potential, coor, dk)
+                       dV += potential_energy(new_bead[:, al], mu, lamda,
+                                    potential_kind, potential, coor, dk) \
+                            - potential_energy(old_bead[:, al], mu, lamda,
+                                    potential_kind, potential, coor, dk)
 
                     #-------------------------------------------
                     # Change in the kinetic energy
                     #-------------------------------------------
-                    dp1[:partition1, al] = baza[:partition1, (jj + 1) % LENGHT]
-                    dm1[:partition1, al] = baza[:partition1, (jj - 1) % LENGHT]
+                    next_bead[:partition1, al] = path[:partition1,
+                                                      (jj + 1) % path_length]
+                    previous_bead[:partition1, al] = path[:partition1,
+                                                      (jj - 1) % path_length]
 
                     #====================FIRST===========================
-                    if jj % M == 0:
+                    if jj % n_beads == 0:
                        # this if statement was added in 26.4.2021
-                       dK1 += (multi(mass, dm1[:, al] - q[:, al], cle1)\
-                            - multi(mass, dm1[:, al] - d[:, al], cle1))\
-                            + multi(mass, dp1[:, al] - q[:, al], identiteta)\
-                            - multi(mass, dp1[:, al] - d[:, al], identiteta)
-                    elif jj % M == (M - 1):
-                       dK1 += multi(mass, dm1[:, al] - q[:, al], identiteta)\
-                            - multi(mass, dm1[:, al] - d[:, al], identiteta)\
-                            + (multi(mass, dp1[:, al] - q[:, al], cle1)\
-                            - multi(mass, dp1[:, al] - d[:, al], cle1))
+                       dK1 += (multi(mass, previous_bead[:, al]
+                                     - new_bead[:, al], lam1)\
+                            - multi(mass, previous_bead[:, al]
+                                    - old_bead[:, al], lam1))\
+                            + multi(mass, next_bead[:, al]
+                                    - new_bead[:, al], identity)\
+                            - multi(mass, next_bead[:, al]
+                                    - old_bead[:, al], identity)
+                    elif jj % n_beads == (n_beads - 1):
+                       dK1 += multi(mass, previous_bead[:, al]
+                                    - new_bead[:, al], identity)\
+                            - multi(mass, previous_bead[:, al]
+                                    - old_bead[:, al], identity)\
+                            + (multi(mass, next_bead[:, al]
+                                     - new_bead[:, al], lam1)\
+                            - multi(mass, next_bead[:, al]
+                                    - old_bead[:, al], lam1))
                     else:
-                       dK1 += 2 * ((q[:, al] - d[:, al]) @ mass \
-                            @ (q[:, al] + d[:, al] - dp1[:, al] - dm1[:, al]))
+                       dK1 += 2 * ((new_bead[:, al] - old_bead[:, al]) @ mass \
+                            @ (new_bead[:, al] + old_bead[:, al]
+                               - next_bead[:, al] - previous_bead[:, al]))
                     #====================================================
 
-                    dp1[partition1 :partition2, al] = baza[
-                                    partition1 :partition2, (jj + 1) % LENGHT]
-                    dm1[partition1 :partition2, al] = baza[
-                                    partition1 :partition2, (jj - 1) % LENGHT]
+                    next_bead[partition1 :partition2, al] = path[
+                                    partition1 :partition2,
+                                    (jj + 1) % path_length]
+                    previous_bead[partition1 :partition2, al] = path[
+                                    partition1 :partition2,
+                                    (jj - 1) % path_length]
 
                     #====================SECOND==========================
-                    if jj % M == 0:
+                    if jj % n_beads == 0:
                        # this if statement was added in 26.4.2021
-                       dK1 += (multi(mass, dm1[:, al] - q[:, al], cle2)\
-                             - multi(mass, dm1[:, al] - d[:, al], cle2))
-                    elif jj % M == (M - 1):
-                       dK1 += (multi(mass, dp1[:, al] - q[:, al], cle2)\
-                             - multi(mass, dp1[:, al] - d[:, al], cle2))
+                       dK1 += (multi(mass, previous_bead[:, al]
+                                     - new_bead[:, al], lam2)\
+                             - multi(mass, previous_bead[:, al]
+                                     - old_bead[:, al], lam2))
+                    elif jj % n_beads == (n_beads - 1):
+                       dK1 += (multi(mass, next_bead[:, al]
+                                     - new_bead[:, al], lam2)\
+                             - multi(mass, next_bead[:, al]
+                                     - old_bead[:, al], lam2))
                     #====================================================
 
                 dE1 = dV + dK1
 
                 # Accept the move if
                 if dE1 < 0:
-                    for al in range(order):
-                        baza[:, j[al] + al * M] = q[:, al]
-                    n_excepted += 1
+                    for al in range(renyi_order):
+                        path[:, j[al] + al * n_beads] = new_bead[:, al]
+                    n_accepted += 1
 
                     V += dV
                     K1 += dK1
 
                 elif rand() < np.exp(-dE1):
-                    for al in range(order):
-                        baza[:, j[al] + al * M] = q[:, al]
-                    n_excepted += 1
+                    for al in range(renyi_order):
+                        path[:, j[al] + al * n_beads] = new_bead[:, al]
+                    n_accepted += 1
 
                     V += dV
                     K1 += dK1
@@ -395,36 +420,36 @@ def functionND_copies_dc(beta, zeta, cle1, cle2, order, mass, mu, lamda,
                 # this was added in 30.6.2021
 
                 dV, dK1 = 0, 0
-                d[:, 0] = baza[:, M]
-                q[:, 0] = -baza[:, M]
-                dm1[:, 0] = baza[:, M - 1]
+                old_bead[:, 0] = path[:, n_beads]
+                new_bead[:, 0] = -path[:, n_beads]
+                previous_bead[:, 0] = path[:, n_beads - 1]
 
-                d[:, 1] = baza[:, -1]
-                q[:, 1] = -baza[:, -1]
-                dm1[:, 1] = baza[:, 0]
+                old_bead[:, 1] = path[:, -1]
+                new_bead[:, 1] = -path[:, -1]
+                previous_bead[:, 1] = path[:, 0]
 
                 # loop over copies
-                for al in range(2):
+                for al in range(renyi_order):
                     #====================ONLY_===========================
-                    dK1 += (multi(mass, dm1[:, al]\
-                                    - q[:, al], reflection_mask)\
-                          - multi(mass, dm1[:, al]\
-                                    - d[:, al], reflection_mask))
+                    dK1 += (multi(mass, previous_bead[:, al]\
+                                    - new_bead[:, al], reflection_mask)\
+                          - multi(mass, previous_bead[:, al]\
+                                    - old_bead[:, al], reflection_mask))
                     #====================================================
 
                 dE1 = dV + dK1
 
                 # Accept the move if
                 if dE1 < 0:
-                    baza[:, M:] = -baza[:, M:]
-                    n_excepted += 1
+                    path[:, n_beads:] = -path[:, n_beads:]
+                    n_accepted += 1
 
                     V += dV
                     K1 += dK1
 
                 elif rand() < np.exp(-dE1):
-                    baza[:, M:] = -baza[:, M:]
-                    n_excepted += 1
+                    path[:, n_beads:] = -path[:, n_beads:]
+                    n_accepted += 1
 
                     V += dV
                     K1 += dK1
@@ -433,82 +458,83 @@ def functionND_copies_dc(beta, zeta, cle1, cle2, order, mass, mu, lamda,
             # Observables
             #-------------------------------------------
             ''' Here we meassure our observable. '''
-            if step > start and step % SAMPLING_NUMBER == CODE:
+            if step > start and step % sampling_interval == sampling_offset:
                 average_V += V
                 average_K1 -= K1
 
                 kinetic_part1, kinetic_part2 = 0, 0
                 potential_part1, potential_part2 = 0, 0
-                # for link in range(M):
-                # this works only in order = 2 example!!
-                for al in range(order):
+                # this works only in renyi_order = 2 example!!
+                for al in range(renyi_order):
                     b.fill(0)
                     b2.fill(0)
                     v1.fill(0)
                     v2.fill(0)
 
-                    b += baza[:, al * M]
-                    b2 += baza[:, (al + 1) * M - 1]
-                    b2[:partition1] = baza[:partition1, al * M - 1]
-                    v1 += (b - b2) * cle_mask
-                    kinetic_part1 += (v1 @ mass @ v1) # cle1
+                    b += path[:, al * n_beads]
+                    b2 += path[:, (al + 1) * n_beads - 1]
+                    b2[:partition1] = path[:partition1, al * n_beads - 1]
+                    v1 += (b - b2) * lam_mask
+                    kinetic_part1 += (v1 @ mass @ v1) # lam1
 
-                    b2[partition1 :partition2] = baza[\
-                                        partition1 :partition2, al * M - 1]
-                    v2 += (b - b2) * cle_mask
-                    kinetic_part2 += (v2 @ mass @ v2) # cle2
+                    b2[partition1 :partition2] = path[\
+                                    partition1 :partition2, al * n_beads - 1]
+                    v2 += (b - b2) * lam_mask
+                    kinetic_part2 += (v2 @ mass @ v2) # lam2
 
-                    b[:partition1] = baza[:partition1, al * M - M]
-                    potential_part1 += V_standard(b, mu, lamda, A, B,
-                                                potential, coor, dk) / 2
-                    b[partition1 :partition2] = baza[\
-                                        partition1 :partition2, al * M - M]
-                    potential_part2 += V_standard(b, mu, lamda, A, B,
-                                                potential, coor, dk) / 2
+                    b[:partition1] = path[:partition1, al * n_beads - n_beads]
+                    potential_part1 += potential_energy(b, mu, lamda,
+                                    potential_kind, potential, coor,
+                                    dk) / 2
+                    b[partition1 :partition2] = path[\
+                              partition1 :partition2, al * n_beads - n_beads]
+                    potential_part2 += potential_energy(b, mu, lamda,
+                                    potential_kind, potential, coor,
+                                    dk) / 2
 
-                DGRANDE = (kinetic_part2 - kinetic_part1)
-                average_ratio += DGRANDE
+                kinetic_difference = (kinetic_part2 - kinetic_part1)
+                average_ratio += kinetic_difference
 
                 if memory:
-                    V_tot[n_used] = V
-                    K_tot[n_used] = K1
-                    Ratio_tot[n_used] = DGRANDE
-                    T0_tot[n_used] = kinetic_part1
-                    T1_tot[n_used] = kinetic_part2
-                    V0_tot[n_used] = potential_part1
-                    V1_tot[n_used] = potential_part2
+                    V_samples[n_used] = V
+                    K_samples[n_used] = K1
+                    ratio_samples[n_used] = kinetic_difference
+                    T0_samples[n_used] = kinetic_part1
+                    T1_samples[n_used] = kinetic_part2
+                    V0_samples[n_used] = potential_part1
+                    V1_samples[n_used] = potential_part2
                 if position:
-                    x[n_used] = np.copy(baza)
+                    x[n_used] = np.copy(path)
                 n_used += 1
 
     if not memory:
-        K_tot = np.zeros(10, dtype=np.float32)
-        V_tot = np.zeros(10, dtype=np.float32)
-        Ratio_tot = np.zeros(10, dtype=np.float32)
-        T0_tot = np.zeros(10, dtype=np.float32)
-        T1_tot = np.zeros(10, dtype=np.float32)
-        V0_tot = np.zeros(10, dtype=np.float32)
-        V1_tot = np.zeros(10, dtype=np.float32)
+        K_samples = np.zeros(10, dtype=np.float32)
+        V_samples = np.zeros(10, dtype=np.float32)
+        ratio_samples = np.zeros(10, dtype=np.float32)
+        T0_samples = np.zeros(10, dtype=np.float32)
+        T1_samples = np.zeros(10, dtype=np.float32)
+        V0_samples = np.zeros(10, dtype=np.float32)
+        V1_samples = np.zeros(10, dtype=np.float32)
     if not position:
         x = np.zeros((10, 10, 10), dtype=np.float32)
-    print('exceptance ratio: ', n_excepted / NUMBER_OF_STEPS)
-    return baza, average_V / (n_used*beta), average_K1 / (n_used*beta), x,\
-                            K_tot / beta, V_tot / beta, T0_tot, T1_tot,\
-                            average_ratio / n_used, Ratio_tot, V0_tot, V1_tot
+    print('acceptance ratio: ', n_accepted / n_steps)
+    return path, average_V / (n_used*beta), average_K1 / (n_used*beta), x,\
+                    K_samples / beta, V_samples / beta, T0_samples,\
+                    T1_samples, average_ratio / n_used, ratio_samples,\
+                    V0_samples, V1_samples
 
 
-def CHQO_ND_Renyi(beta, zeta, cle, order, mass, mu, lamda, shift, partition1,
-                  partition2, NUMBER_OF_STEPS, epsilon, start, SEED, CODE,
-                  SAMPLING_NUMBER, dimension=1, memory=False, position=False,
-                  index=False, NAME='lam6_doublew', cle2=False,
-                  real_index=10, POTENTIAL_TYPE='analytic'):
+def run_renyi(beta, zeta, lam1, renyi_order, mass, mu, lamda, shift,
+              partition1, partition2, n_steps, epsilon, start, random_seed,
+              sampling_offset, sampling_interval, dimension=1, memory=False,
+              position=False, index=False, name='lam6_doublew', lam2=False,
+              real_index=10, potential_type='analytic', *, saveto,
+              reflection_interval=100):
 
-    '''This function calls functionND_copies_dc() and saves the
+    '''This function calls sample_replicas() and saves the
     results. In the case of realistic 2D potential it performs some
-    spline interpolation, to make grid for linear interpolation denser.'''
-
-    if partition1 == False:
-        parition = partition2
+    spline interpolation, to make grid for linear interpolation denser.
+    saveto is the folder where the results are saved.'''
 
     # these must be converted to numpy arrays
     mass = np.array(mass, dtype=np.float64)
@@ -520,8 +546,8 @@ def CHQO_ND_Renyi(beta, zeta, cle, order, mass, mu, lamda, shift, partition1,
     #-------------------------------------------
     # Call the main function
     #-------------------------------------------
-    
-    if POTENTIAL_TYPE == 'realistic':
+
+    if potential_type == 'realistic':
         # This is done like this, because the spline interpolation is not
         # yet implemented in numba. We thought that this is easier to do,
         # than implementing spline only for this pourpose.
@@ -529,20 +555,18 @@ def CHQO_ND_Renyi(beta, zeta, cle, order, mass, mu, lamda, shift, partition1,
         # Constants have to be evaluated like in the main function
         Mw = max(int(beta / zeta), 3)
         zetaw = beta / Mw
-        epsilonw = np.sqrt(zetaw)
 
         Mw = max(int(beta / zetaw), 3)
         print('M : ', Mw)
         zetaw = beta / Mw
-        muw, lamdaw, massw = mu * zetaw, lamda * zetaw, mass / zetaw
 
         # we load the realistic potential
         potentials = np.load(POTLOC)
         distances = np.load(DISLOC)
         # These parameters, depend on the potential in use.
-        N = 30
+        n_grid = 30
         x, dx = np.linspace(0.5, distances[real_index][0] - 0.5,
-                                                            N, retstep=True)
+                                                    n_grid, retstep=True)
         x = x - (x[-1] - x[0]) / 2 - x[0]
         X, Y = np.meshgrid(x, x)
         # fit the spline to the potential
@@ -552,21 +576,22 @@ def CHQO_ND_Renyi(beta, zeta, cle, order, mass, mu, lamda, shift, partition1,
            spline = bisplrep(X, Y, potentials[real_index] * zetaw, s=0)
 
         # interpolate the potential with the spline, to make points denser
-        N = 10000
+        n_grid = 10000
         coor, dk = np.linspace(0.5, distances[real_index][0] - 0.5,
-                                                            N, retstep=True)
+                                                    n_grid, retstep=True)
         coor = coor - (coor[-1] - coor[0]) / 2 - coor[0]
         dk = dk ** 2
         potential = bisplev(coor, coor, tck=spline)
 
-        vse = functionND_copies_dc(beta, zeta, cle, cle2, order, mass, mu,
-                   lamda, shift, partition1, partition2, NUMBER_OF_STEPS,
-                   epsilon, start, SEED, CODE,
-                   SAMPLING_NUMBER, state, potential, coor, dk,
+        results = sample_replicas(beta, zeta, lam1, lam2, renyi_order, mass,
+                   mu, lamda, shift, partition1, partition2, n_steps,
+                   epsilon, start, random_seed, sampling_offset,
+                   sampling_interval, state, potential, coor, dk,
                    dimension=dimension, memory=memory, position=position,
-                   RandomState=True)
+                   random_state=True, potential_kind=1,
+                   reflection_interval=reflection_interval)
 
-    elif POTENTIAL_TYPE == 'analytic':
+    elif potential_type == 'analytic':
 
         # just define the constants that are not used, but simplify the
         # program, so that now only one potential function can be used.
@@ -574,37 +599,30 @@ def CHQO_ND_Renyi(beta, zeta, cle, order, mass, mu, lamda, shift, partition1,
         # that numba would complicate things.
         dk = 0
         coor = np.array((2, 2), dtype=np.float64)
-        vse = functionND_copies_dc(beta, zeta, cle, cle2, order, mass, mu,
-                   lamda, shift, partition1, partition2, NUMBER_OF_STEPS,
-                   epsilon, start, SEED, CODE,
-                   SAMPLING_NUMBER, state, potential, coor, dk,
+        potential = np.zeros((2, 2), dtype=np.float64)
+        results = sample_replicas(beta, zeta, lam1, lam2, renyi_order, mass,
+                   mu, lamda, shift, partition1, partition2, n_steps,
+                   epsilon, start, random_seed, sampling_offset,
+                   sampling_interval, state, potential, coor, dk,
                    dimension=dimension, memory=memory, position=position,
-                   RandomState=True)
+                   random_state=True, potential_kind=0,
+                   reflection_interval=reflection_interval)
 
     #-------------------------------------------
     # Saving the results
     #-------------------------------------------
 
-    np.save(os.path.join(SAVETO, NAME + 'INDEX_' + str(index) + '_Ratio'),
-    vse[-4])
-    np.save(os.path.join(SAVETO, NAME + 'INDEX_' + str(index) + '_Ratio_tot'),
-    vse[-3])
-    np.save(os.path.join(SAVETO, NAME + 'INDEX_' + str(index) + '_T0_tot'),
-    vse[-6])
-    np.save(os.path.join(SAVETO, NAME + 'INDEX_' + str(index) + '_T1_tot'),
-    vse[-5])
-    np.save(os.path.join(SAVETO, NAME + 'INDEX_' + str(index) + '_K_tot'),
-    vse[-8])
-    np.save(os.path.join(SAVETO, NAME + 'INDEX_' + str(index) + '_V_tot'),
-    vse[-7])
-    np.save(os.path.join(SAVETO, NAME + 'INDEX_' + str(index) + '_basis'),
-    vse[0])
-    np.save(os.path.join(SAVETO, NAME + 'INDEX_' + str(index) + '_x'),
-    vse[-9])
-    np.save(os.path.join(SAVETO, NAME + 'INDEX_' + str(index) + '_V0_tot'),
-    vse[-2])
-    np.save(os.path.join(SAVETO, NAME + 'INDEX_' + str(index) + '_V1_tot'),
-    vse[-1])
+    (path, average_V, average_K1, x, K_samples, V_samples, T0_samples,
+     T1_samples, average_ratio, ratio_samples, V0_samples,
+     V1_samples) = results
+    prefix = os.path.join(saveto, name + 'INDEX_' + str(index))
+    for suffix, data in [('_Ratio', average_ratio),
+                         ('_Ratio_tot', ratio_samples),
+                         ('_T0_tot', T0_samples), ('_T1_tot', T1_samples),
+                         ('_K_tot', K_samples), ('_V_tot', V_samples),
+                         ('_path', path), ('_x', x),
+                         ('_V0_tot', V0_samples), ('_V1_tot', V1_samples)]:
+        np.save(prefix + suffix, data)
 
     #-------------------------------------------
     # Saving the parameters
@@ -612,30 +630,79 @@ def CHQO_ND_Renyi(beta, zeta, cle, order, mass, mu, lamda, shift, partition1,
 
     dictionary = {'beta': beta,
               'zeta': zeta,
-              'clé': cle,
-              'cle2': cle2,
-              'order': order,
+              'lam1': lam1,
+              'lam2': lam2,
+              'renyi_order': renyi_order,
               'mass': mass,
               'mu': mu,
               'lamda': lamda,
               'shift': shift,
               'partition1': partition1,
               'partition2': partition2,
-              'NUMBER_OF_STEPS': NUMBER_OF_STEPS,
+              'n_steps': n_steps,
               'epsilon': epsilon,
               'start': start,
               'memory': memory,
               'position': position,
-              'SEED': SEED,
-              'CODE': CODE,
-              'SAMPLING_NUMBER': SAMPLING_NUMBER,
-              'dimension': dimension
+              'random_seed': random_seed,
+              'sampling_offset': sampling_offset,
+              'sampling_interval': sampling_interval,
+              'dimension': dimension,
+              'reflection_interval': reflection_interval
               }
 
-    with open(os.path.join(SAVETO, NAME + '_args.p'), 'wb') as fp:
+    with open(prefix + '_args.p', 'wb') as fp:
         pickle.dump(dictionary, fp, protocol=4)
-    # with open(os.path.join(SAVETO, NAME + '_args.p'), 'rb') as fp:
-    #     dictionary = pickle.load(fp)
 
 
+def integrate_paper(y, x):
+    '''Simpson's rule as in the old scipy function simps(even='avg'),
+    which was used in the paper. For an even number of points it averages
+    Simpson on the first points with the trapezoid on the last interval,
+    and the trapezoid on the first interval with Simpson on the last
+    points. The current scipy simpson differs for an even number of points.'''
+    if len(x) % 2 == 1:
+        return integrate.simpson(y, x=x)
+    first = integrate.simpson(y[:-1], x=x[:-1])\
+            + (x[-1] - x[-2]) * (y[-1] + y[-2]) / 2
+    last = integrate.simpson(y[1:], x=x[1:])\
+            + (x[1] - x[0]) * (y[0] + y[1]) / 2
+    return (first + last) / 2
 
+
+def renyi_entropy(saveto, name, path_points, dlam1, dlam2, thin=8,
+                  n_blocks=20):
+    '''Second order Renyi entropy (in nats) from the results that
+    run_renyi() saved for the points along the integration path.
+
+    The results of point i are read from saveto/name + 'INDEX_' + str(i),
+    i = 0, ..., len(path_points) - 1, as in Example.py. dlam1 and dlam2 are
+    the derivatives of the path weights lam1 and lam2 at path_points. Only
+    every thin-th sample is used. The integrand T0 * dlam1 + T1 * dlam2 is
+    averaged over the samples and integrated over the path with
+    integrate_paper().
+
+    The error is the error of the mean: the samples are split into n_blocks
+    consecutive blocks, the integral is computed for each block, and the
+    standard deviation of the block integrals is divided by
+    sqrt(n_blocks). The figures of the paper show 3 times this value.'''
+    samples = []
+    for index in range(len(path_points)):
+        prefix = os.path.join(saveto, name + 'INDEX_' + str(index))
+        T0 = np.load(prefix + '_T0_tot.npy')[::thin]
+        T1 = np.load(prefix + '_T1_tot.npy')[::thin]
+        samples.append(T0 * dlam1[index] + T1 * dlam2[index])
+    samples = np.array(samples)
+
+    entropy = integrate_paper(np.sum(samples, axis=1) / len(samples[0]),
+                              path_points)
+
+    size = len(samples[0]) // n_blocks
+    blocks = np.zeros(n_blocks)
+    for i in range(n_blocks):
+        blocks[i] += integrate_paper(np.sum(samples[:, i * size :
+                                     (i + 1) * size], axis=1) / size,
+                                     path_points)
+    average = np.sum(blocks) / n_blocks
+    spread = np.sqrt(np.sum((blocks - average) ** 2) / n_blocks)
+    return entropy, spread / np.sqrt(n_blocks)

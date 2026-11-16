@@ -3,17 +3,15 @@ This is a library of functions that are used by the Wolff
 cluster algorithm and heat-bath algorithm.
 '''
 
-import math
-import numba
 import numpy as np
-from numba import jit, njit
+from numba import njit
 from numpy.random import rand
 
 
 @njit(fastmath=True)
-def isin(val, arr, SIZE):
-    '''Alternative to "is in".'''
-    for i in range(SIZE):
+def isin(val, arr, size):
+    '''Alternative to "is in": checks the first size elements of arr.'''
+    for i in range(size):
         if arr[i] == val:
             return True
     return False
@@ -25,33 +23,34 @@ def isin(val, arr, SIZE):
 #°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°
 
 @njit
-def observable(N, M, const, partition1, partition2, state):
+def observable(n_spins, n_beads, time_coupling, partition1, partition2,
+               state):
     '''Observable in thermodynamic integration.'''
-    # the contributing ones are just (0, M-1), (0, 2M - 1), 
-    # (M, 2M - 1), (M, M-1)
+    # the contributing ones are just (0, n_beads - 1), (0, 2 n_beads - 1),
+    # (n_beads, 2 n_beads - 1), (n_beads, n_beads - 1)
     T0, T1 = 0, 0
     # we sample only this section
     for x in range(partition1, partition2):
-        if state[x, 0] == state[x, M - 1]:
+        if state[x, 0] == state[x, n_beads - 1]:
             T0 += 1
         else:
             T0 -= 1
-        if state[x, M] == state[x, 2 * M - 1]:
+        if state[x, n_beads] == state[x, 2 * n_beads - 1]:
             T0 += 1
         else:
             T0 -= 1
-        if state[x, 0] == state[x, 2 * M - 1]:
+        if state[x, 0] == state[x, 2 * n_beads - 1]:
             T1 += 1
         else:
             T1 -= 1
-        if state[x, M] == state[x, M - 1]:
+        if state[x, n_beads] == state[x, n_beads - 1]:
             T1 += 1
         else:
             T1 -= 1
-    return T0 * const, T1 * const
+    return T0 * time_coupling, T1 * time_coupling
 
 @njit
-def KineticAB(N, M, ch, sh, partition2, partition1, state):
+def kinetic_ab(n_spins, n_beads, ch, sh, partition2, partition1, state):
     '''Observable for SWAP operator. '''
     K = 1
     if partition1 > partition2:
@@ -62,18 +61,19 @@ def KineticAB(N, M, ch, sh, partition2, partition1, state):
        end = partition2
     for i in range(start, end):
         if i < partition2:
-            for j in [-1, M - 1]:
-                if state[i, j] == state[i, (j + 1) % (2 * M)]:
+            for j in [-1, n_beads - 1]:
+                if state[i, j] == state[i, (j + 1) % (2 * n_beads)]:
                     K *= ch
                 else:
                     K *= sh
         else:
-            j = M - 1
-            if state[i, j] == state[i, (j + 1) % M]:
+            j = n_beads - 1
+            if state[i, j] == state[i, (j + 1) % n_beads]:
                 K *= ch
             else:
                 K *= sh
-            if state[i, j + M] == state[i, (j + 1) % M + M]:
+            if (state[i, j + n_beads]
+                    == state[i, (j + 1) % n_beads + n_beads]):
                 K *= ch
             else:
                 K *= sh
@@ -86,51 +86,52 @@ def KineticAB(N, M, ch, sh, partition2, partition1, state):
 #°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°
 
 @njit
-def OPERATOR(nn, mm, SIZE_C, POCKET, SIZE, CLUSTER_indi, NUMO, CLUSTER_name):
+def add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                   cluster_sites, site_id, cluster_ids):
     '''This function adds new spin to the cluster. '''
-    #CLUSTER[nn, mm] = True
-    CLUSTER_indi[SIZE_C, 0] = nn
-    CLUSTER_indi[SIZE_C, 1] = mm
-    CLUSTER_name[SIZE_C] = NUMO
-    SIZE_C += 1
-    POCKET[SIZE] = NUMO
-    SIZE += 1
-    return SIZE_C, POCKET, SIZE, CLUSTER_indi, CLUSTER_name
+    cluster_sites[cluster_size, 0] = n_new
+    cluster_sites[cluster_size, 1] = m_new
+    cluster_ids[cluster_size] = site_id
+    cluster_size += 1
+    pocket[pocket_size] = site_id
+    pocket_size += 1
+    return cluster_size, pocket, pocket_size, cluster_sites, cluster_ids
 
 @njit
-def EXPAND(N, M, TIME, const, pP, pK, pK1, pK2, partition1, partition2,
-              state, POCKET, CLUSTER_indi, SIZE, SIZE_C, n, m, CLUSTER_name):
+def expand_cluster(n_spins, n_beads, n_slices, time_coupling, p_space, p_time,
+                   p_boundary1, p_boundary2, partition1, partition2, state,
+                   pocket, cluster_sites, pocket_size, cluster_size, n, m,
+                   cluster_ids):
     '''The main part of the Wolf cluster algorithm. Adding the spin in the
     vertical and horisontal dimension is split. Because the neighbouring
     spins in the same bead interact only by the potential term and are
     not affected by the boundary condition.  '''
-    NUMBER = POCKET[SIZE - 1]
-    POCKET[SIZE - 1] = 0
-    SIZE -= 1
+    pocket[pocket_size - 1] = 0
+    pocket_size -= 1
 
     #-------------------------------------------
     # Neighbouring spins in the same bead
     #-------------------------------------------
 
-    nn = (n - 1) % N
-    mm = m
-    NUMO = mm + nn * TIME
-    if state[nn, mm] == state[n, m]\
-                and (not isin(NUMO, CLUSTER_name, SIZE_C)) and rand() < pP:
-        SIZE_C, POCKET, SIZE,\
-        CLUSTER_indi, CLUSTER_name = OPERATOR(nn, mm, SIZE_C, POCKET,
-                                              SIZE, CLUSTER_indi, NUMO,
-                                                            CLUSTER_name)
+    n_new = (n - 1) % n_spins
+    m_new = m
+    site_id = m_new + n_new * n_slices
+    if (state[n_new, m_new] == state[n, m]
+            and not isin(site_id, cluster_ids, cluster_size)
+            and rand() < p_space):
+        cluster_size, pocket, pocket_size, cluster_sites, cluster_ids = \
+            add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                           cluster_sites, site_id, cluster_ids)
 
-    nn = (n + 1) % N
-    mm = m
-    NUMO = mm + nn * TIME
-    if state[nn, mm] == state[n, m]\
-                and (not isin(NUMO, CLUSTER_name, SIZE_C)) and rand() < pP:
-        SIZE_C, POCKET, SIZE,\
-        CLUSTER_indi, CLUSTER_name = OPERATOR(nn, mm, SIZE_C, POCKET,
-                                              SIZE, CLUSTER_indi, NUMO,
-                                                            CLUSTER_name)
+    n_new = (n + 1) % n_spins
+    m_new = m
+    site_id = m_new + n_new * n_slices
+    if (state[n_new, m_new] == state[n, m]
+            and not isin(site_id, cluster_ids, cluster_size)
+            and rand() < p_space):
+        cluster_size, pocket, pocket_size, cluster_sites, cluster_ids = \
+            add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                           cluster_sites, site_id, cluster_ids)
 
     #---------------------------------------------------
     # Neighbouring spins in the imaginary-time direction
@@ -140,117 +141,117 @@ def EXPAND(N, M, TIME, const, pP, pK, pK1, pK2, partition1, partition2,
         #-------------------------------------------
         # the connected replicas coordinates
         #-------------------------------------------
-        nn = n
-        mm = (m + 1) % TIME
-        NUMO = mm + nn * TIME
-        if state[nn, mm] == state[n, m]\
-                and (not isin(NUMO, CLUSTER_name, SIZE_C)) and rand() < pK:
-            SIZE_C, POCKET, SIZE,\
-            CLUSTER_indi, CLUSTER_name = OPERATOR(nn, mm, SIZE_C, POCKET,
-                                                  SIZE, CLUSTER_indi, NUMO,
-                                                               CLUSTER_name)
+        n_new = n
+        m_new = (m + 1) % n_slices
+        site_id = m_new + n_new * n_slices
+        if (state[n_new, m_new] == state[n, m]
+                and not isin(site_id, cluster_ids, cluster_size)
+                and rand() < p_time):
+            cluster_size, pocket, pocket_size, cluster_sites, cluster_ids = \
+                add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                               cluster_sites, site_id, cluster_ids)
 
-        nn = nn
-        mm = (m - 1) % TIME
-        NUMO = mm + nn * TIME
-        if state[nn, mm] == state[n, m]\
-                and (not isin(NUMO, CLUSTER_name, SIZE_C)) and rand() < pK:
-            SIZE_C, POCKET, SIZE,\
-            CLUSTER_indi, CLUSTER_name = OPERATOR(nn, mm, SIZE_C, POCKET,
-                                                  SIZE, CLUSTER_indi, NUMO,
-                                                               CLUSTER_name)
+        n_new = n_new
+        m_new = (m - 1) % n_slices
+        site_id = m_new + n_new * n_slices
+        if (state[n_new, m_new] == state[n, m]
+                and not isin(site_id, cluster_ids, cluster_size)
+                and rand() < p_time):
+            cluster_size, pocket, pocket_size, cluster_sites, cluster_ids = \
+                add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                               cluster_sites, site_id, cluster_ids)
 
-    elif n < partition2 and m % M == 0:
+    elif n < partition2 and m % n_beads == 0:
         #-------------------------------------------
         # mixed coordinates on one side
         #-------------------------------------------
-        nn = n
-        mm = (m + 1) % TIME
-        NUMO = mm + nn * TIME
-        if state[nn, mm] == state[n, m]\
-                and (not isin(NUMO, CLUSTER_name, SIZE_C)) and rand() < pK:
-            SIZE_C, POCKET, SIZE,\
-            CLUSTER_indi, CLUSTER_name = OPERATOR(nn, mm, SIZE_C, POCKET,
-                                                  SIZE, CLUSTER_indi, NUMO,
-                                                               CLUSTER_name)
+        n_new = n
+        m_new = (m + 1) % n_slices
+        site_id = m_new + n_new * n_slices
+        if (state[n_new, m_new] == state[n, m]
+                and not isin(site_id, cluster_ids, cluster_size)
+                and rand() < p_time):
+            cluster_size, pocket, pocket_size, cluster_sites, cluster_ids = \
+                add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                               cluster_sites, site_id, cluster_ids)
 
-        nn = nn
-        mm = (m - 1) % TIME
-        NUMO = mm + nn * TIME
-        if state[nn, mm] == state[n, m]\
-                and (not isin(NUMO, CLUSTER_name, SIZE_C)) and rand() < pK2:
-            SIZE_C, POCKET, SIZE,\
-            CLUSTER_indi, CLUSTER_name = OPERATOR(nn, mm, SIZE_C, POCKET,
-                                                  SIZE, CLUSTER_indi, NUMO,
-                                                               CLUSTER_name)
+        n_new = n_new
+        m_new = (m - 1) % n_slices
+        site_id = m_new + n_new * n_slices
+        if (state[n_new, m_new] == state[n, m]
+                and not isin(site_id, cluster_ids, cluster_size)
+                and rand() < p_boundary2):
+            cluster_size, pocket, pocket_size, cluster_sites, cluster_ids = \
+                add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                               cluster_sites, site_id, cluster_ids)
 
-        nn = nn
-        mm = (m - 1) % M + (m // M ) * M
-        NUMO = mm + nn * TIME
-        if state[nn, mm] == state[n, m]\
-                and (not isin(NUMO, CLUSTER_name, SIZE_C)) and rand() < pK1:
-            SIZE_C, POCKET, SIZE,\
-            CLUSTER_indi, CLUSTER_name = OPERATOR(nn, mm, SIZE_C, POCKET,
-                                                  SIZE, CLUSTER_indi, NUMO,
-                                                               CLUSTER_name)
+        n_new = n_new
+        m_new = (m - 1) % n_beads + (m // n_beads ) * n_beads
+        site_id = m_new + n_new * n_slices
+        if (state[n_new, m_new] == state[n, m]
+                and not isin(site_id, cluster_ids, cluster_size)
+                and rand() < p_boundary1):
+            cluster_size, pocket, pocket_size, cluster_sites, cluster_ids = \
+                add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                               cluster_sites, site_id, cluster_ids)
 
-    elif n < partition2 and m % M == (M - 1):
+    elif n < partition2 and m % n_beads == (n_beads - 1):
         #-------------------------------------------
         # mixed coordinates on the other side
         #-------------------------------------------
-        nn = n
-        mm = (m - 1) % TIME
-        NUMO = mm + nn * TIME
-        if state[nn, mm] == state[n, m]\
-                and (not isin(NUMO, CLUSTER_name, SIZE_C)) and rand() < pK:
-            SIZE_C, POCKET, SIZE,\
-            CLUSTER_indi, CLUSTER_name = OPERATOR(nn, mm, SIZE_C, POCKET,
-                                                  SIZE, CLUSTER_indi, NUMO,
-                                                               CLUSTER_name)
+        n_new = n
+        m_new = (m - 1) % n_slices
+        site_id = m_new + n_new * n_slices
+        if (state[n_new, m_new] == state[n, m]
+                and not isin(site_id, cluster_ids, cluster_size)
+                and rand() < p_time):
+            cluster_size, pocket, pocket_size, cluster_sites, cluster_ids = \
+                add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                               cluster_sites, site_id, cluster_ids)
 
-        nn = nn
-        mm = (m + 1) % TIME
-        NUMO = mm + nn * TIME
-        if state[nn, mm] == state[n, m]\
-                and (not isin(NUMO, CLUSTER_name, SIZE_C)) and rand() < pK2:
-            SIZE_C, POCKET, SIZE,\
-            CLUSTER_indi, CLUSTER_name = OPERATOR(nn, mm, SIZE_C, POCKET,
-                                                  SIZE, CLUSTER_indi, NUMO,
-                                                               CLUSTER_name)
+        n_new = n_new
+        m_new = (m + 1) % n_slices
+        site_id = m_new + n_new * n_slices
+        if (state[n_new, m_new] == state[n, m]
+                and not isin(site_id, cluster_ids, cluster_size)
+                and rand() < p_boundary2):
+            cluster_size, pocket, pocket_size, cluster_sites, cluster_ids = \
+                add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                               cluster_sites, site_id, cluster_ids)
 
-        nn = nn
-        mm = (m + 1) % M + (m // M ) * M
-        NUMO = mm + nn * TIME
-        if state[nn, mm] == state[n, m]\
-                and (not isin(NUMO, CLUSTER_name, SIZE_C)) and rand() < pK1:
-            SIZE_C, POCKET, SIZE,\
-            CLUSTER_indi, CLUSTER_name = OPERATOR(nn, mm, SIZE_C, POCKET,
-                                                  SIZE, CLUSTER_indi, NUMO,
-                                                               CLUSTER_name)
+        n_new = n_new
+        m_new = (m + 1) % n_beads + (m // n_beads ) * n_beads
+        site_id = m_new + n_new * n_slices
+        if (state[n_new, m_new] == state[n, m]
+                and not isin(site_id, cluster_ids, cluster_size)
+                and rand() < p_boundary1):
+            cluster_size, pocket, pocket_size, cluster_sites, cluster_ids = \
+                add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                               cluster_sites, site_id, cluster_ids)
 
     else:
         #-------------------------------------------
         # split replicas coordinates
         #-------------------------------------------
-        nn = n
-        mm = (m + 1) % M + (m // M ) * M
-        NUMO = mm + nn * TIME
-        if state[nn, mm] == state[n, m]\
-                 and (not isin(NUMO, CLUSTER_name, SIZE_C)) and rand() < pK:
-            SIZE_C, POCKET, SIZE,\
-            CLUSTER_indi, CLUSTER_name = OPERATOR(nn, mm, SIZE_C, POCKET,
-                                                  SIZE, CLUSTER_indi, NUMO,
-                                                               CLUSTER_name)
+        n_new = n
+        m_new = (m + 1) % n_beads + (m // n_beads ) * n_beads
+        site_id = m_new + n_new * n_slices
+        if (state[n_new, m_new] == state[n, m]
+                and not isin(site_id, cluster_ids, cluster_size)
+                and rand() < p_time):
+            cluster_size, pocket, pocket_size, cluster_sites, cluster_ids = \
+                add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                               cluster_sites, site_id, cluster_ids)
 
-        nn = nn
-        mm =  (m - 1) % M + (m // M ) * M
-        NUMO = mm + nn * TIME
-        if state[nn, mm] == state[n, m]\
-                 and (not isin(NUMO, CLUSTER_name, SIZE_C)) and rand() < pK:
-            SIZE_C, POCKET, SIZE,\
-            CLUSTER_indi, CLUSTER_name = OPERATOR(nn, mm, SIZE_C, POCKET,
-                                                  SIZE, CLUSTER_indi, NUMO,
-                                                               CLUSTER_name)
+        n_new = n_new
+        m_new =  (m - 1) % n_beads + (m // n_beads ) * n_beads
+        site_id = m_new + n_new * n_slices
+        if (state[n_new, m_new] == state[n, m]
+                and not isin(site_id, cluster_ids, cluster_size)
+                and rand() < p_time):
+            cluster_size, pocket, pocket_size, cluster_sites, cluster_ids = \
+                add_to_cluster(n_new, m_new, cluster_size, pocket, pocket_size,
+                               cluster_sites, site_id, cluster_ids)
 
-    return SIZE_C, POCKET, SIZE, CLUSTER_indi, CLUSTER_name
+    return cluster_size, pocket, pocket_size, cluster_sites, cluster_ids
 
