@@ -31,9 +31,10 @@ import math
 import pickle
 from scipy.interpolate import bisplrep, bisplev
 
-SAVETO = '/scratchalpha/srdinsek/HarmonicOscillator/CHQO_ND_Renyi'
-POTLOC = "potentials.npy"
-DISLOC = "distances.npy"
+SAVETO = './'
+HERE = os.path.dirname(os.path.abspath(__file__))
+POTLOC = os.path.join(HERE, "potentials.npy")
+DISLOC = os.path.join(HERE, "distances.npy")
 
 @njit(error_model="numpy")
 def InitialEnergy(baza, b, b2, v1, v2, M, partition1, partition2,
@@ -145,7 +146,7 @@ def functionND_copies_dc(beta, zeta, cle1, cle2, order, mass, mu, lamda,
                       shift, partition1, partition2, NUMBER_OF_STEPS, epsilon,
                       start, SEED, CODE, SAMPLING_NUMBER, state, potential,
                       coor, dk, dimension=1, memory=False, position=False,
-                      RandomState=True):
+                      RandomState=True, A=1):
     '''This is the function that simulates the ensembles that gives
     the Rényi entanglement entropy. Parameter ´partition1´ specifies
     the number of joint copies starting from particle 0. Zero means there
@@ -157,7 +158,8 @@ def functionND_copies_dc(beta, zeta, cle1, cle2, order, mass, mu, lamda,
     and modifies the subsystem spaning from particle 0 to particle
     (partition2 - 1). The function with parameters partition2=0, partition1
     simulates ensemlbe, where copies spanning from particle 0 to particle
-    (partition1 - 1) are joined.'''
+    (partition1 - 1) are joined. Parameter ´A´ selects the potential:
+    0 for analytic, 1 for realistic 2D (linear interpolation).'''
     
     # zeta - beta / M
     # epsilon - define the variance of random numbers
@@ -178,7 +180,7 @@ def functionND_copies_dc(beta, zeta, cle1, cle2, order, mass, mu, lamda,
     #-------------------------------------------
 
     POT_CORR = False
-    A, B = 1, 4 * 40 * 0.1 ** 6
+    B = 4 * 40 * 0.1 ** 6
     epsilon_class = 1 / epsilon
     M = max(int(beta / zeta), 3)
     LENGHT = M * order
@@ -508,7 +510,7 @@ def CHQO_ND_Renyi(beta, zeta, cle, order, mass, mu, lamda, shift, partition1,
     spline interpolation, to make grid for linear interpolation denser.'''
 
     if partition1 == False:
-        parition = partition2
+        partition = partition2
 
     # these must be converted to numpy arrays
     mass = np.array(mass, dtype=np.float64)
@@ -564,7 +566,7 @@ def CHQO_ND_Renyi(beta, zeta, cle, order, mass, mu, lamda, shift, partition1,
                    epsilon, start, SEED, CODE,
                    SAMPLING_NUMBER, state, potential, coor, dk,
                    dimension=dimension, memory=memory, position=position,
-                   RandomState=True)
+                   RandomState=True, A=1)
 
     elif POTENTIAL_TYPE == 'analytic':
 
@@ -574,12 +576,13 @@ def CHQO_ND_Renyi(beta, zeta, cle, order, mass, mu, lamda, shift, partition1,
         # that numba would complicate things.
         dk = 0
         coor = np.array((2, 2), dtype=np.float64)
+        potential = np.zeros((2, 2), dtype=np.float64)
         vse = functionND_copies_dc(beta, zeta, cle, cle2, order, mass, mu,
                    lamda, shift, partition1, partition2, NUMBER_OF_STEPS,
                    epsilon, start, SEED, CODE,
                    SAMPLING_NUMBER, state, potential, coor, dk,
                    dimension=dimension, memory=memory, position=position,
-                   RandomState=True)
+                   RandomState=True, A=0)
 
     #-------------------------------------------
     # Saving the results

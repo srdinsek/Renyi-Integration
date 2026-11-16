@@ -31,7 +31,7 @@ import math
 
 from IsingMC_main_lib import EXPAND,observable,KineticAB
 
-SAVETO = '/scratchalpha/srdinsek/IsingModel/Ising_1D_Renyi/'
+SAVETO = './'
 # define the directory where results of 1) and 2) will be saved
 
 

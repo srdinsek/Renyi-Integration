@@ -1,0 +1,4 @@
+# Versions with which the code was last tested (Python 3.11)
+numpy==1.26.4
+numba==0.58.1
+scipy==1.15.3
