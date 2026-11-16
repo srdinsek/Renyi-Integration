@@ -1,5 +1,7 @@
 # Renyi-Integration
 
+Author: [Miha Srdinšek](https://srdinsek.github.io/)
+
 Calculations reported in the paper ["Quantum Rényi entropy by optimal thermodynamic integration paths"](https://doi.org/10.1103/PhysRevResearch.4.L032002) (M. Srdinšek, M. Casula, R. Vuilleumier, *Phys. Rev. Research* **4**, L032002 (2022)) were performed using the routines in this repository. The folder **Ising** contains programs for the evaluation of the Rényi entropy in the quantum Ising model, and the folder **AbInitio** for the evaluation in an *ab initio* model with an arbitrary potential. Only the second-order Rényi entropy is supported.
 
 ## Installation
