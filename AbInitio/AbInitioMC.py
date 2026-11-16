@@ -634,25 +634,25 @@ def run_renyi(beta, zeta, lam1, renyi_order, mass, mu, lamda, shift,
 
     dictionary = {'beta': beta,
               'zeta': zeta,
-              'clé': lam1,
-              'cle2': lam2,
-              'order': renyi_order,
+              'lam1': lam1,
+              'lam2': lam2,
+              'renyi_order': renyi_order,
               'mass': mass,
               'mu': mu,
               'lamda': lamda,
               'shift': shift,
               'partition1': partition1,
               'partition2': partition2,
-              'NUMBER_OF_STEPS': n_steps,
+              'n_steps': n_steps,
               'epsilon': epsilon,
               'start': start,
               'memory': memory,
               'position': position,
-              'SEED': random_seed,
-              'CODE': sampling_offset,
-              'SAMPLING_NUMBER': sampling_interval,
+              'random_seed': random_seed,
+              'sampling_offset': sampling_offset,
+              'sampling_interval': sampling_interval,
               'dimension': dimension
               }
 
-    with open(os.path.join(saveto, name + '_args.p'), 'wb') as fp:
+    with open(prefix + '_args.p', 'wb') as fp:
         pickle.dump(dictionary, fp, protocol=4)
