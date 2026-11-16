@@ -16,7 +16,7 @@ It's performance is enhaced by the extensive use of numba's decorator
 @njit, but at the same time numba restricts us with it limitations.
 
 It is important to define:
-SAVETO - where to save the results
+SAVETO - where to save the results (argument of CHQO_ND_Renyi)
 POTLOC - if realistic potential is used, it's address
 DISLOC - if realistic potential is used, the address of it's grid
 
@@ -31,7 +31,6 @@ import math
 import pickle
 from scipy.interpolate import bisplrep, bisplev
 
-SAVETO = './'
 HERE = os.path.dirname(os.path.abspath(__file__))
 POTLOC = os.path.join(HERE, "potentials.npy")
 DISLOC = os.path.join(HERE, "distances.npy")
@@ -503,11 +502,12 @@ def CHQO_ND_Renyi(beta, zeta, cle, order, mass, mu, lamda, shift, partition1,
                   partition2, NUMBER_OF_STEPS, epsilon, start, SEED, CODE,
                   SAMPLING_NUMBER, dimension=1, memory=False, position=False,
                   index=False, NAME='lam6_doublew', cle2=False,
-                  real_index=10, POTENTIAL_TYPE='analytic'):
+                  real_index=10, POTENTIAL_TYPE='analytic', *, SAVETO):
 
     '''This function calls functionND_copies_dc() and saves the
     results. In the case of realistic 2D potential it performs some
-    spline interpolation, to make grid for linear interpolation denser.'''
+    spline interpolation, to make grid for linear interpolation denser.
+    SAVETO is the folder where the results are saved.'''
 
     if partition1 == False:
         partition = partition2

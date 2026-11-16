@@ -24,15 +24,13 @@ IsingMC_main_lib. It's performance is enhaced by the extensive
 use of numba's decorator @njit.
 """
 
+import os
 import numpy as np
 from numba import jit, njit
 from numpy.random import rand,randint,normal,uniform,seed
 import math
 
 from IsingMC_main_lib import EXPAND,observable,KineticAB
-
-SAVETO = './'
-# define the directory where results of 1) and 2) will be saved
 
 
 @njit(error_model="numpy")
@@ -256,7 +254,7 @@ def MontePath_Master(betaJ, zeta, N, r, InitialState, IS, NUMBER_OF_STEPS,
 
 def MAIN_integral(betaJ, zeta, N, r, NUMBER_OF_STEPS, start,
                     SAMPLING_NUMBER, CODE, RENYI_ORDER, partition2,
-                            partition1, N_WALKERS, cle0, cle1, qq, index):
+                            partition1, N_WALKERS, cle0, cle1, qq, index, SAVETO):
    '''This is an example of how one should run the code for
    the thermodynamic integration. In our calculations this function
    is called many times in parallel and hence results and parameters
@@ -268,14 +266,14 @@ def MAIN_integral(betaJ, zeta, N, r, NUMBER_OF_STEPS, start,
                       RENYI_ORDER, partition2, partition1, N_WALKERS,
                       cle0, cle1, TYPE_OF_OBS_STR = 'integral')
    
-   np.save(SAVETO + 'T0all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
+   np.save(os.path.join(SAVETO, 'T0all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
             + 'r_' + str(r) + '_N_' + str(N) + '_cle0_' + str(cle0)\
             + '_cle1_' + str(cle1) + '_integral_Part_' + str(partition2)\
-            + '_' + str(partition1), rezultat[-4])
-   np.save(SAVETO + 'T1all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
+            + '_' + str(partition1)), rezultat[-4])
+   np.save(os.path.join(SAVETO, 'T1all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
             + 'r_' + str(r) + '_N_' + str(N) + '_cle0_' + str(cle0)\
             + '_cle1_' + str(cle1) + '_integral_Part_' + str(partition2)\
-            + '_' + str(partition1), rezultat[-3])
+            + '_' + str(partition1)), rezultat[-3])
    
 
    qq.put((index, cle0, cle1, rezultat[-2], rezultat[-1]))
@@ -284,7 +282,7 @@ def MAIN_integral(betaJ, zeta, N, r, NUMBER_OF_STEPS, start,
 
 def MAIN_ratio(betaJ, zeta, N, r, NUMBER_OF_STEPS, start,
                     SAMPLING_NUMBER, CODE, RENYI_ORDER, partition2,
-                                          partition1, N_WALKERS, qq, index):
+                                          partition1, N_WALKERS, qq, index, SAVETO):
    '''This is an example of how one should run the code for
    the evaluatoin of SWAP. In our calculations this function
    is called many times in parallel and hence results and parameters
@@ -301,18 +299,18 @@ def MAIN_ratio(betaJ, zeta, N, r, NUMBER_OF_STEPS, start,
                       RENYI_ORDER, partition2, partition1, N_WALKERS,
                       1, 0, TYPE_OF_OBS_STR = 'ratio')
 
-   np.save(SAVETO + 'BOL0all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
+   np.save(os.path.join(SAVETO, 'BOL0all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
             + 'r_' + str(r) + '_N_' + str(N) + '_ratio_Part_'\
-            + str(partition2) + '_' + str(partition1), rezultat1[-4])
-   np.save(SAVETO + 'BOL1all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
+            + str(partition2) + '_' + str(partition1)), rezultat1[-4])
+   np.save(os.path.join(SAVETO, 'BOL1all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
             + 'r_' + str(r) + '_N_' + str(N) + '_ratio_Part_'\
-            + str(partition2) + '_' + str(partition1), rezultat2[-4])
-   np.save(SAVETO + 'MET0all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
+            + str(partition2) + '_' + str(partition1)), rezultat2[-4])
+   np.save(os.path.join(SAVETO, 'MET0all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
             + 'r_' + str(r) + '_N_' + str(N) + '_ratio_Part_'\
-            + str(partition2) + '_' + str(partition1), rezultat1[-3])
-   np.save(SAVETO + 'MET1all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
+            + str(partition2) + '_' + str(partition1)), rezultat1[-3])
+   np.save(os.path.join(SAVETO, 'MET1all_betaJ_' + str(betaJ) + 'zeta_' + str(zeta)\
             + 'r_' + str(r) + '_N_' + str(N) + '_ratio_Part_'\
-            + str(partition2) + '_' + str(partition1), rezultat2[-3])
+            + str(partition2) + '_' + str(partition1)), rezultat2[-3])
 
 
    qq.put((partition1, rezultat1[-2], rezultat2[-2],

@@ -39,6 +39,7 @@ def main(args):
     beta = 1050
     design = 10.0
     NAME = 'lam6_doublew'
+    SAVETO = './' # folder where the results are saved
     index = 0
     LEN = 16
     clex = np.linspace(0, 1, LEN)
@@ -85,7 +86,8 @@ def main(args):
                             order, mass, mu, lamda, shift, partition1,
                             partition2, NUMBER_OF_STEPS, epsilon, start, SEED,
                             CODE, SAMPLING_NUMBER, dimension, True, False,
-                            index, NAME, cle2, -10, 'realistic')))
+                            index, NAME, cle2, -10, 'realistic'),
+                            kwargs={'SAVETO': SAVETO}))
         index += 1
 
     for p in procesi:

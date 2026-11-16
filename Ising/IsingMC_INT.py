@@ -18,9 +18,10 @@ of the magnetic field.
 
 The code is called by running the command of the effect
 
-python3 IsingMC_INT.py 3 0.2 64 0.0001 3.5 22 50000 full 16
+python3 IsingMC_INT.py 3 0.2 64 0.0001 3.5 22 50000 full 16 ./
 
 in the terminal. The 8-th parameter can be either 'half' or 'full'.
+The last parameter is the folder where all results are saved.
 The default parameters that I use are:
 
     start = 10 ** 4
@@ -44,17 +45,20 @@ from IsingMC_main_cluster import MontePath_Master
 from IsingMC_main_cluster import MAIN_integral, MAIN_ratio
 
 print("Number of processors: ", mp.cpu_count())
-SAVETO = './'
 
 def main(args):
     print(args[0], flush=True)
-    if len(args) != 10:
-       print("8 arguments required:\n" \
+    if len(args) == 10:
+       raise ValueError("SAVETO is missing: give the folder where results "
+                        "are saved as the last argument")
+    if len(args) != 11:
+       print("10 arguments required:\n" \
                 + "betaJ, zeta, N = args[1], args[2], args[3]\n"\
                 + "r_min, r_max, N_steps = args[4], args[5], args[6]\n"\
                 + "NUMBER_OF_STEPS = args[7]\n"\
                 + "GESLO = args[8]"\
-                + "LEN (num. of CPU) = args[9]\n")
+                + "LEN (num. of CPU) = args[9]\n"\
+                + "SAVETO = args[10]\n")
        return None
 
     #-------------------------------------------
@@ -76,6 +80,7 @@ def main(args):
 
 
     LEN = int(args[9])
+    SAVETO = args[10]
     rr = np.linspace(r_min, r_max, N_steps)
     # weights defining the path
     clex = np.linspace(0, np.pi / 2, LEN)
@@ -109,13 +114,13 @@ def main(args):
              procesi.append(Process(target=MAIN_integral, args=(betaJ, zeta,
                       N, r, NUMBER_OF_STEPS, start, SAMPLING_NUMBER, CODE,
                       RENYI_ORDER, N // 2, 0, N_WALKERS, cle1[i], cle2[i],
-                      queueti[-1], i)))
+                      queueti[-1], i, SAVETO)))
           else:
              # list of processes
              procesi.append(Process(target=MAIN_integral, args=(betaJ, zeta,
                       N, r, NUMBER_OF_STEPS, start, SAMPLING_NUMBER, CODE,
                       RENYI_ORDER, N, 0, N_WALKERS, cle1[i], cle2[i],
-                      queueti[-1], i)))
+                      queueti[-1], i, SAVETO)))
        for p in procesi:
           # start the process p
           p.start()

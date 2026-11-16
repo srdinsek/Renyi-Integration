@@ -12,28 +12,27 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Results are saved to the current directory by default; change `SAVETO` at the top of the files to save them elsewhere.
-
 ## Ising model
 
-The algorithm defined in **IsingMC_main_cluster.py** was used to compare thermodynamic integration in Ising model to the evaluation of the *SWAP* operator. Different procedures can be used by running either **IsingMC_RAT.py** for *SWAP* or **IsingMC_INT.py** for thermodynamic integration. `SAVETO` at the beginning of **IsingMC_RAT.py** and **IsingMC_INT.py** specifies where final results (after post processing) should be stored, but notice that there is another one in **IsingMC_main_cluster.py**, that specifies where intermediate results should be stored. The two programs are run by calling
+The algorithm defined in **IsingMC_main_cluster.py** was used to compare thermodynamic integration in Ising model to the evaluation of the *SWAP* operator. Different procedures can be used by running either **IsingMC_RAT.py** for *SWAP* or **IsingMC_INT.py** for thermodynamic integration. The two programs are run by calling
 
 ```
-python3 IsingMC_RAT.py beta zeta N r_min r_max r_N NUMBER_OF_STEPS LEN
+python3 IsingMC_RAT.py beta zeta N r_min r_max r_N NUMBER_OF_STEPS LEN SAVETO
 
-python3 IsingMC_INT.py beta zeta N r_min r_max r_N NUMBER_OF_STEPS GESLO LEN
+python3 IsingMC_INT.py beta zeta N r_min r_max r_N NUMBER_OF_STEPS GESLO LEN SAVETO
 ```
 
 **Each program requires `LEN` processors.**
 
 The parameters define:
 - `beta` - inverse temperature
-- `zeta` - $\zeta$ that we want (but can be modified, due to the min and max number of beads)
+- `zeta` - imaginary-time step $\zeta = \beta / M$, where $M$ is the number of beads per replica. The program sets $M$ = `int(beta / zeta)` and then resets $\zeta = \beta / M$, so that $M$ is an integer.
 - `N` - number of spins
 - `r_min, r_max, r_N` - specifies the magnetic fields used. Means: `numpy.linspace(r_min, r_max, r_N)`
 - `NUMBER_OF_STEPS` - number of steps in [Wolff cluster algorithm](https://en.wikipedia.org/wiki/Wolff_algorithm)
 - `GESLO` ('full' or 'half')- specifies if in thermodynamic integration full entropy or entanglement entropy of the half should be evaluated
 - `LEN` - number of integration steps (thermodynamic integration, there is no actual integration in Monte Carlo algorithm) in thermodynamic integration and number of intermediate states when measuring *SWAP*. Equals the number of processors used.
+- `SAVETO` - folder where all results are saved
 
 In the files there are additional parameters that can be modified. 
 
@@ -49,12 +48,13 @@ The algorithm defined in **AbInitioMC.py** can be used to compute Rényi entangl
 
 **The program requires `LEN` processors.**
 
-All the necessary parameters are defined in **Example.py**. **Example.py** is set for the evaluation of Rényi entanglement entropy of one Hydrogen in realistic 2D potential. To change the directory on which results will be saved, modify `SAVETO` at the beginning of **AbInitioMC.py**. Potential is defined in **AbInitioMC.py** and can be modified to suit ones needs.
+All the necessary parameters are defined in **Example.py**. **Example.py** is set for the evaluation of Rényi entanglement entropy of one Hydrogen in realistic 2D potential. Potential is defined in **AbInitioMC.py** and can be modified to suit ones needs.
 
 Parameters defined below can be modified, others are redundant, or shouldn't be modified.
 - `beta` - inverse temperature
-- `design` - $\zeta$ that we want (but can be modified, due to the min and max number of beads)
+- `design` - requested imaginary-time step $\zeta = \beta / M$, where $M$ is the number of beads per replica. **Example.py** chooses $M$ from `int(beta / design)`, limited to between 6 and 300, and then uses $\zeta = \beta / M$.
 - `NAME` - head of the files with results
+- `SAVETO` - folder where all results are saved
 - `index` - number that further distinguishes the files with results
 - `LEN` - number of integration steps (thermodynamic integration, there is no actual integration in Monte Carlo algorithm). Equals the number of processors used.
 - `m` - mass of the quantum particle 
