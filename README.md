@@ -17,28 +17,28 @@ pip install -r requirements.txt
 The algorithm defined in **IsingMC_main_cluster.py** was used to compare thermodynamic integration in Ising model to the evaluation of the *SWAP* operator. Different procedures can be used by running either **IsingMC_RAT.py** for *SWAP* or **IsingMC_INT.py** for thermodynamic integration. The two programs are run by calling
 
 ```
-python3 IsingMC_RAT.py beta zeta N r_min r_max r_N NUMBER_OF_STEPS LEN SAVETO
+python3 IsingMC_RAT.py beta zeta n_spins r_min r_max n_fields n_steps n_points saveto
 
-python3 IsingMC_INT.py beta zeta N r_min r_max r_N NUMBER_OF_STEPS GESLO LEN SAVETO
+python3 IsingMC_INT.py beta zeta n_spins r_min r_max n_fields n_steps subsystem n_points saveto
 ```
 
-**Each program requires `LEN` processors.**
+**Each program requires `n_points` processors.**
 
 The parameters define:
 - `beta` - inverse temperature
 - `zeta` - imaginary-time step $\zeta = \beta / M$, where $M$ is the number of beads per replica. The program sets $M$ = `int(beta / zeta)` and then resets $\zeta = \beta / M$, so that $M$ is an integer.
-- `N` - number of spins
-- `r_min, r_max, r_N` - specifies the magnetic fields used. Means: `numpy.linspace(r_min, r_max, r_N)`
-- `NUMBER_OF_STEPS` - number of steps in [Wolff cluster algorithm](https://en.wikipedia.org/wiki/Wolff_algorithm)
-- `GESLO` ('full' or 'half')- specifies if in thermodynamic integration full entropy or entanglement entropy of the half should be evaluated
-- `LEN` - number of integration steps (thermodynamic integration, there is no actual integration in Monte Carlo algorithm) in thermodynamic integration and number of intermediate states when measuring *SWAP*. Equals the number of processors used.
-- `SAVETO` - folder where all results are saved
+- `n_spins` - number of spins
+- `r_min, r_max, n_fields` - specifies the magnetic fields used. Means: `numpy.linspace(r_min, r_max, n_fields)`
+- `n_steps` - number of steps in [Wolff cluster algorithm](https://en.wikipedia.org/wiki/Wolff_algorithm)
+- `subsystem` ('full' or 'half') - specifies if in thermodynamic integration full entropy or entanglement entropy of the half should be evaluated
+- `n_points` - number of integration steps (thermodynamic integration, there is no actual integration in Monte Carlo algorithm) in thermodynamic integration and number of intermediate states when measuring *SWAP*. Equals the number of processors used.
+- `saveto` - folder where all results are saved
 
 In the files there are additional parameters that can be modified. 
 
     start = 10 ** 4 # when to start sampling the observable
-    SAMPLING_NUMBER = 100 # every SAMPLING_NUMBER step observables are recorded
-    N_WALKERS = 5 # number of walkers - parallel runs of the same system
+    sampling_interval = 100 # every sampling_interval step observables are recorded
+    n_walkers = 5 # number of walkers - parallel runs of the same system
 
 ## Ab initio
 
@@ -46,31 +46,31 @@ The algorithm defined in **AbInitioMC.py** can be used to compute Rényi entangl
 
     python3 Example.py
 
-**The program requires `LEN` processors.**
+**The program requires `n_points` processors.**
 
 All the necessary parameters are defined in **Example.py**. **Example.py** is set for the evaluation of Rényi entanglement entropy of one Hydrogen in realistic 2D potential. Potential is defined in **AbInitioMC.py** and can be modified to suit ones needs.
 
 Parameters defined below can be modified, others are redundant, or shouldn't be modified.
 - `beta` - inverse temperature
 - `design` - requested imaginary-time step $\zeta = \beta / M$, where $M$ is the number of beads per replica. **Example.py** chooses $M$ from `int(beta / design)`, limited to between 6 and 300, and then uses $\zeta = \beta / M$.
-- `NAME` - head of the files with results
-- `SAVETO` - folder where all results are saved
+- `name` - head of the files with results
+- `saveto` - folder where all results are saved
 - `index` - number that further distinguishes the files with results
-- `LEN` - number of integration steps (thermodynamic integration, there is no actual integration in Monte Carlo algorithm). Equals the number of processors used.
+- `n_points` - number of integration steps (thermodynamic integration, there is no actual integration in Monte Carlo algorithm). Equals the number of processors used.
 - `m` - mass of the quantum particle 
-- `lamda` - parameter matrix defining the potential **used only if POTENTIAL_TYPE='analytic'**
-- `gamma` - parameter matrix defining the potential **used only if POTENTIAL_TYPE='analytic'**
+- `lamda` - parameter matrix defining the potential **used only if potential_type='analytic'**
+- `gamma` - parameter matrix defining the potential **used only if potential_type='analytic'**
 - `mass` - matrix describing the interaction in *imaginary-time* direction. For 2D, it is simply [[m / 2, 0], [0, m / 2]].
 - `shift` - shift of the initial state
 - `partition1` - number of joint copies starting from particle 0. Zero means there are none.
 - `partition2` - specifies the trial size starting from particle 0.
-- `NUMBER_OF_STEPS` - number of steps in [Metropolis algorithm](https://en.wikipedia.org/wiki/Metropolis–Hastings_algorithm)
+- `n_steps` - number of steps in [Metropolis algorithm](https://en.wikipedia.org/wiki/Metropolis–Hastings_algorithm)
 - `start` - when to start sampling the observable
 - `class_move_number` - every class_move_number step, move with reflecting the positions of the copies is proposed
-- `SAMPLING_NUMBER` - every SAMPLING_NUMBER step observables are recorded
+- `sampling_interval` - every sampling_interval step observables are recorded
 - `dimension` - how many particles there are
-- `SEED` - seed for random numbers
-- `POTENTIAL_TYPE` ('analytic' or 'realistic') - specifies the type of potential.
+- `random_seed` - seed for random numbers
+- `potential_type` ('analytic' or 'realistic') - specifies the type of potential.
 
 If `partition1` is nonzero, then the trial size is `partition2 - partition1`. Trial copies are the ones that we modify during the thermodynamic integration. For example:
 1. function with parameters `partition2`, `partition1=0` simulates split ensemble and modifies the subsystem spanning from particle 0 to particle (partition2 - 1).

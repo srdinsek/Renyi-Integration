@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-This code uses function MontePath_Master defined in IsingMC_main_cluster
+This code uses function cluster_monte_carlo defined in IsingMC_main_cluster
 for evaluation of Renyi entropy with Wolf cluster algorithm. It measures
 the kinetic energy of springs that are varied along the path in
 thermodynamic integration.
 
 Task is parallelised, and each step along the path is evaluated
-using different processor. Number of steps is set by LEN.
+using different processor. Number of steps is set by n_points.
 
 *************************************************************
-Make sure that number of processors is compatible with LEN.
+Make sure that number of processors is compatible with n_points.
 *************************************************************
 
 This code was written for the purpose of comparing the integration
@@ -25,11 +25,11 @@ The last parameter is the folder where all results are saved.
 The default parameters that I use are:
 
     start = 10 ** 4
-    SAMPLING_NUMBER = 100
-    CODE = 0
-    RENYI_ORDER = 2
-    N_WALKERS = 5
-    LONG = (60 * NUMBER_OF_STEPS - start) // SAMPLING_NUMBER
+    sampling_interval = 100
+    sampling_offset = 0
+    renyi_order = 2
+    n_walkers = 5
+    LONG = (60 * n_steps - start) // sampling_interval
 
 """
 
@@ -41,161 +41,148 @@ from timeit import default_timer as timer
 from multiprocessing import Process
 import multiprocessing as mp
 
-from IsingMC_main_cluster import MontePath_Master
-from IsingMC_main_cluster import MAIN_integral, MAIN_ratio
+from IsingMC_main_cluster import cluster_monte_carlo
+from IsingMC_main_cluster import run_integral, run_ratio
 
 print("Number of processors: ", mp.cpu_count())
 
 def main(args):
     print(args[0], flush=True)
     if len(args) == 10:
-       raise ValueError("SAVETO is missing: give the folder where results "
+       raise ValueError("saveto is missing: give the folder where results "
                         "are saved as the last argument")
     if len(args) != 11:
        print("10 arguments required:\n" \
-                + "betaJ, zeta, N = args[1], args[2], args[3]\n"\
-                + "r_min, r_max, N_steps = args[4], args[5], args[6]\n"\
-                + "NUMBER_OF_STEPS = args[7]\n"\
-                + "GESLO = args[8]"\
-                + "LEN (num. of CPU) = args[9]\n"\
-                + "SAVETO = args[10]\n")
+                + "betaJ, zeta, n_spins = args[1], args[2], args[3]\n"\
+                + "r_min, r_max, n_fields = args[4], args[5], args[6]\n"\
+                + "n_steps = args[7]\n"\
+                + "subsystem = args[8]\n"\
+                + "n_points (num. of CPU) = args[9]\n"\
+                + "saveto = args[10]\n")
        return None
 
     #-------------------------------------------
     # Parameters
     #-------------------------------------------
 
-    betaJ, zeta, N = float(args[1]), float(args[2]), int(args[3])
+    betaJ, zeta, n_spins = float(args[1]), float(args[2]), int(args[3])
     r_min, r_max = float(args[4]), float(args[5])
-    N_steps, NUMBER_OF_STEPS = int(args[6]), int(args[7])
-    GESLO = args[8] # either 'half' or 'full'
+    n_fields, n_steps = int(args[6]), int(args[7])
+    subsystem = args[8] # either 'half' or 'full'
 
     start = 10 ** 4
-    SAMPLING_NUMBER = 100
-    print('sampling number: ', SAMPLING_NUMBER)
-    CODE = 0
-    RENYI_ORDER = 2 # Must be set to 2
-    N_WALKERS = 5
-    LONG = (60 * NUMBER_OF_STEPS - start) // SAMPLING_NUMBER
+    sampling_interval = 100
+    print('sampling number: ', sampling_interval)
+    sampling_offset = 0
+    renyi_order = 2 # Must be set to 2
+    n_walkers = 5
+    LONG = (60 * n_steps - start) // sampling_interval
 
 
-    LEN = int(args[9])
-    SAVETO = args[10]
-    rr = np.linspace(r_min, r_max, N_steps)
+    n_points = int(args[9])
+    saveto = args[10]
+    r_values = np.linspace(r_min, r_max, n_fields)
     # weights defining the path
-    clex = np.linspace(0, np.pi / 2, LEN)
-    cle1 = np.cos(clex) ** 12
-    cle2 = np.sin(clex) ** 12
+    path_points = np.linspace(0, np.pi / 2, n_points)
+    lam0_points = np.cos(path_points) ** 12
+    lam1_points = np.sin(path_points) ** 12
 
     #-------------------------------------------
     # Algorithm
     #-------------------------------------------
     T0, T1 = [], []
-    ERR0, ERR1 = [], []
+    error0, error1 = [], []
     # loop over the strenghts of the magnetic field
-    for r in rr:
-       GATHER_T0, GATHER_T1 = np.zeros(LEN), np.zeros(LEN)
-       GATHER_ERROR0, GATHER_ERROR1 = np.zeros(LEN), np.zeros(LEN)
+    for r in r_values:
+       T0_points, T1_points = np.zeros(n_points), np.zeros(n_points)
+       error0_points = np.zeros(n_points)
+       error1_points = np.zeros(n_points)
 
        print('r: ', r, flush=True)
-       procesi = []
-       queueti = []
-       ruru_all = []
+       processes = []
+       queues = []
+       results = []
 
        #-------------------------------------------
        # Loop over the processes
        #-------------------------------------------
-       st = timer()
-       for i in range(LEN):
+       start_time = timer()
+       for i in range(n_points):
           # bag into which we will save results
-          queueti.append(mp.Queue())
-          if GESLO == 'half':
+          queues.append(mp.Queue())
+          if subsystem == 'half':
              # list of processes
-             procesi.append(Process(target=MAIN_integral, args=(betaJ, zeta,
-                      N, r, NUMBER_OF_STEPS, start, SAMPLING_NUMBER, CODE,
-                      RENYI_ORDER, N // 2, 0, N_WALKERS, cle1[i], cle2[i],
-                      queueti[-1], i, SAVETO)))
+             processes.append(Process(target=run_integral, args=(betaJ,
+                      zeta, n_spins, r, n_steps, start, sampling_interval,
+                      sampling_offset, renyi_order, n_spins // 2, 0,
+                      n_walkers, lam0_points[i], lam1_points[i],
+                      queues[-1], i, saveto)))
           else:
              # list of processes
-             procesi.append(Process(target=MAIN_integral, args=(betaJ, zeta,
-                      N, r, NUMBER_OF_STEPS, start, SAMPLING_NUMBER, CODE,
-                      RENYI_ORDER, N, 0, N_WALKERS, cle1[i], cle2[i],
-                      queueti[-1], i, SAVETO)))
-       for p in procesi:
+             processes.append(Process(target=run_integral, args=(betaJ,
+                      zeta, n_spins, r, n_steps, start, sampling_interval,
+                      sampling_offset, renyi_order, n_spins, 0,
+                      n_walkers, lam0_points[i], lam1_points[i],
+                      queues[-1], i, saveto)))
+       for p in processes:
           # start the process p
           p.start()
-       for p in procesi:
+       for p in processes:
           p.join()
-       en = timer()
-       print('TIME: ', en - st, '\n', flush=True)
+       end_time = timer()
+       print('TIME: ', end_time - start_time, '\n', flush=True)
 
-       for p in queueti:
+       for p in queues:
           # move all the results from the bag to the list
-          ruru_all.append(p.get())
+          results.append(p.get())
 
        #-------------------------------------------
        # Post processing of results
        #-------------------------------------------
        # because processes don't necessarily start and end in the same order,
        # we recognise them by index.
-       for (index, c0, c1, ruru0, ruru1) in ruru_all:
+       for (index, lam0, lam1, T0_walkers, T1_walkers) in results:
 
           # kinetic energy of the two springs forming split ensemble
-          t0 = np.sum(ruru0) / len(ruru0)
+          t0 = np.sum(T0_walkers) / len(T0_walkers)
           # kinetic energy of the two springs forming joint ensemble
-          t1 = np.sum(ruru1) / len(ruru1)
+          t1 = np.sum(T1_walkers) / len(T1_walkers)
 
           # error-bars of energies, based on the variance of the walkers
-          err0 = np.sqrt(np.sum([(t0 - ruru0[i]) ** 2
-                                     for i in range(N_WALKERS)]) / N_WALKERS)
-          err1 = np.sqrt(np.sum([(t1 - ruru1[i]) ** 2
-                                     for i in range(N_WALKERS)]) / N_WALKERS)
+          err0 = np.sqrt(np.sum([(t0 - T0_walkers[i]) ** 2
+                                     for i in range(n_walkers)]) / n_walkers)
+          err1 = np.sqrt(np.sum([(t1 - T1_walkers[i]) ** 2
+                                     for i in range(n_walkers)]) / n_walkers)
 
           # log2 is not used here, instead log is used already in the
           # definition of the observable.
-          GATHER_T0[index] += t0
-          GATHER_T1[index] += t1
-          GATHER_ERROR0[index] += err0
-          GATHER_ERROR1[index] += err1
+          T0_points[index] += t0
+          T1_points[index] += t1
+          error0_points[index] += err0
+          error1_points[index] += err1
 
-       T0.append(GATHER_T0)
-       T1.append(GATHER_T1)
-       ERR0.append(GATHER_ERROR0)
-       ERR1.append(GATHER_ERROR1)
+       T0.append(T0_points)
+       T1.append(T1_points)
+       error0.append(error0_points)
+       error1.append(error1_points)
 
     T0 = np.array(T0)
     T1 = np.array(T1)
-    ERR0 = np.array(ERR0)
-    ERR1 = np.array(ERR1)
+    error0 = np.array(error0)
+    error1 = np.array(error1)
 
     #-------------------------------------------
     # Saving the results
     #-------------------------------------------
 
-    np.save(os.path.join(SAVETO, GESLO + 'pCLiT0_fast_BetaJ_' + str(betaJ)\
-            + '_zeta_' + str(zeta) + '_N_' + str(N) + '_r_dep' + str(LEN)),
-            T0)
-    np.save(os.path.join(SAVETO, GESLO + 'pCLiT1_fast_BetaJ_' + str(betaJ)\
-            + '_zeta_' + str(zeta) + '_N_' + str(N) + '_r_dep' + str(LEN)),
-            T1)
-    np.save(os.path.join(SAVETO, GESLO + 'pCLiERROR_T0_fast_BetaJ_'\
-            + str(betaJ) + '_zeta_' + str(zeta) + '_N_' + str(N) + '_r_dep'\
-            + str(LEN)),
-            ERR0)
-    np.save(os.path.join(SAVETO, GESLO + 'pCLiERROR_T1_fast_BetaJ_'\
-            + str(betaJ) + '_zeta_' + str(zeta) + '_N_' + str(N) + '_r_dep'\
-            + str(LEN)),
-            ERR1)
-    np.save(os.path.join(SAVETO, GESLO + 'pCLiargs_T1_fast_BetaJ_'\
-            + str(betaJ) + '_zeta_' + str(zeta) + '_N_' + str(N) + '_r_dep'\
-            + str(LEN)),
-            np.array([betaJ, zeta, N, r_min, r_max, N_steps,
-            NUMBER_OF_STEPS, SAMPLING_NUMBER, start, CODE]))
-    np.save(os.path.join(SAVETO, GESLO + 'pCLiargs_T1_fast_BetaJ_'\
-            + str(betaJ) + '_zeta_' + str(zeta) + '_N_' + str(N) + '_r_dep'\
-            + str(LEN)),
-            np.array([betaJ, zeta, N, r_min, r_max, N_steps,
-            NUMBER_OF_STEPS, SAMPLING_NUMBER, start, CODE]))
+    tag = ('_fast_BetaJ_' + str(betaJ) + '_zeta_' + str(zeta) + '_N_'
+           + str(n_spins) + '_r_dep' + str(n_points))
+    parameters = np.array([betaJ, zeta, n_spins, r_min, r_max, n_fields,
+                           n_steps, sampling_interval, start, sampling_offset])
+    for name, data in [('pCLiT0', T0), ('pCLiT1', T1),
+                       ('pCLiERROR_T0', error0), ('pCLiERROR_T1', error1),
+                       ('pCLiargs_T1', parameters)]:
+        np.save(os.path.join(saveto, subsystem + name + tag), data)
 
 if __name__ == "__main__":
     main(sys.argv)
