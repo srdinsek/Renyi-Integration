@@ -71,10 +71,19 @@ Parameters defined below can be modified, others are redundant, or shouldn't be 
 - `dimension` - how many particles there are
 - `random_seed` - seed for random numbers
 - `potential_type` ('analytic' or 'realistic') - specifies the type of potential.
+- `real_index` - which grid of **potentials.npy** (and row of **distances.npy**) is used if potential_type='realistic'
 
 If `partition1` is nonzero, then the trial size is `partition2 - partition1`. Trial copies are the ones that we modify during the thermodynamic integration. For example:
 1. function with parameters `partition2`, `partition1=0` simulates split ensemble and modifies the subsystem spanning from particle 0 to particle (partition2 - 1).
 2. The function with parameters `partition2=0`, `partition1` simulates ensemble, where copies spanning from particle 0 to particle (partition1 - 1) are joined.
+
+### Example potential
+
+Any 2D potential on a square grid can be used by replacing **potentials.npy** and **distances.npy**. The files in this repository are the ones used in the paper:
+- **potentials.npy** - 38 grids of 30 × 30 CCSD(T) total energies (Hartree, computed with PySCF) of the formic-acid dimer. The two hydrogens of the hydrogen bonds are moved along their O···O bonds, from 0.5 Å to (d - 0.5) Å; the other atoms are kept at the equilibrium geometry optimised with ORCA, except that one formic-acid molecule is moved rigidly along the C···C axis to change the O···O distances.
+- **distances.npy** - the two O···O distances d (Å) of each grid. It has 40 rows: row i belongs to grid i, and the last two rows have no grid, so use non-negative values of `real_index`.
+
+The paper used `real_index` from 13 to 29.
 
 ## Citation
 

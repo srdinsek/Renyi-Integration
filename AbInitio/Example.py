@@ -82,11 +82,14 @@ def main(args):
         sampling_interval = 1000
         dimension=2
         renyi_order = 2 # only 2 is supported
+        # which grid of potentials.npy (and row of distances.npy) is used
+        real_index = 28
         processes.append(Process(target=run_renyi, args=(beta, zeta, lam1,
                             renyi_order, mass, mu, lamda, shift, partition1,
                             partition2, n_steps, epsilon, start, random_seed,
                             sampling_offset, sampling_interval, dimension,
-                            True, False, index, name, lam2, -10, 'realistic'),
+                            True, False, index, name, lam2, real_index,
+                            'realistic'),
                             kwargs={'saveto': saveto,
                                     'reflection_interval':
                                     reflection_interval}))
