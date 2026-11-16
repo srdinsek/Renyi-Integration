@@ -87,6 +87,17 @@ Any 2D potential on a square grid can be used by replacing **potentials.npy** an
 
 The paper used `real_index` from 13 to 29.
 
+## Tests
+
+From the repository root:
+
+```
+python -m unittest tests.test_ising tests.test_abinitio
+python -m unittest tests.test_oscillators
+```
+
+The first command tests the functions used inside both algorithms (about 30 s). The second one computes the Rényi entropy of one of two coupled harmonic oscillators with **AbInitioMC.py** and compares it with the exact result for the same number of beads; it runs 11 processes in parallel, one per point of the integration path, and takes about a minute per CPU.
+
 ## Citation
 
 If you use this code, please cite:
