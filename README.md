@@ -48,6 +48,8 @@ The algorithm defined in **AbInitioMC.py** can be used to compute Rényi entangl
 
 **The program requires `n_points` processors.**
 
+At the end, **Example.py** integrates the results along the path with `renyi_entropy()` (defined in **AbInitioMC.py**), prints the second-order Rényi entropy with its error, and saves both (in nats) to `name + '_entropy.npy'`. The error is the error of the mean from 20 blocks; the figures of the paper show 3 times this value.
+
 All the necessary parameters are defined in **Example.py**. **Example.py** is set for the evaluation of Rényi entanglement entropy of one Hydrogen in realistic 2D potential. Potential is defined in **AbInitioMC.py** and can be modified to suit ones needs.
 
 Parameters defined below can be modified, others are redundant, or shouldn't be modified.

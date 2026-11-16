@@ -27,9 +27,10 @@ in the terminal. The default parameters that I use are:
         renyi_order = 2
 """
 
+import os
 import sys
 import numpy as np
-from AbInitioMC import run_renyi
+from AbInitioMC import run_renyi, renyi_entropy
 from timeit import default_timer as timer
 from multiprocessing import Process
 import multiprocessing as mp
@@ -101,6 +102,15 @@ def main(args):
         p.join()
     end_time = timer()
     print('TIME: ', end_time - start_time, '\n', flush=True)
+
+    # derivatives of the path weights lam1 = (1 - lam) ** 3, lam2 = lam ** 3
+    dlam1 = -3 * (1 - path_points) ** 2
+    dlam2 = 3 * path_points ** 2
+    entropy, error = renyi_entropy(saveto, name, path_points, dlam1, dlam2)
+    np.save(os.path.join(saveto, name + '_entropy'),
+            np.array([entropy, error]))
+    print('Renyi entropy S2 = ', entropy, ' +- ', error, ' (in units of',
+          'ln 2: ', entropy / np.log(2), ' +- ', error / np.log(2), ')')
 
 
 if __name__ == "__main__":

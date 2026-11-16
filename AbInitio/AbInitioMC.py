@@ -27,6 +27,7 @@ from numba import njit
 from numpy.random import rand,randint,normal,uniform,seed
 import os
 import pickle
+from scipy import integrate
 from scipy.interpolate import bisplrep, bisplev
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -652,3 +653,56 @@ def run_renyi(beta, zeta, lam1, renyi_order, mass, mu, lamda, shift,
 
     with open(prefix + '_args.p', 'wb') as fp:
         pickle.dump(dictionary, fp, protocol=4)
+
+
+def integrate_paper(y, x):
+    '''Simpson's rule as in the old scipy function simps(even='avg'),
+    which was used in the paper. For an even number of points it averages
+    Simpson on the first points with the trapezoid on the last interval,
+    and the trapezoid on the first interval with Simpson on the last
+    points. The current scipy simpson differs for an even number of points.'''
+    if len(x) % 2 == 1:
+        return integrate.simpson(y, x=x)
+    first = integrate.simpson(y[:-1], x=x[:-1])\
+            + (x[-1] - x[-2]) * (y[-1] + y[-2]) / 2
+    last = integrate.simpson(y[1:], x=x[1:])\
+            + (x[1] - x[0]) * (y[0] + y[1]) / 2
+    return (first + last) / 2
+
+
+def renyi_entropy(saveto, name, path_points, dlam1, dlam2, thin=8,
+                  n_blocks=20):
+    '''Second order Renyi entropy (in nats) from the results that
+    run_renyi() saved for the points along the integration path.
+
+    The results of point i are read from saveto/name + 'INDEX_' + str(i),
+    i = 0, ..., len(path_points) - 1, as in Example.py. dlam1 and dlam2 are
+    the derivatives of the path weights lam1 and lam2 at path_points. Only
+    every thin-th sample is used. The integrand T0 * dlam1 + T1 * dlam2 is
+    averaged over the samples and integrated over the path with
+    integrate_paper().
+
+    The error is the error of the mean: the samples are split into n_blocks
+    consecutive blocks, the integral is computed for each block, and the
+    standard deviation of the block integrals is divided by
+    sqrt(n_blocks). The figures of the paper show 3 times this value.'''
+    samples = []
+    for index in range(len(path_points)):
+        prefix = os.path.join(saveto, name + 'INDEX_' + str(index))
+        T0 = np.load(prefix + '_T0_tot.npy')[::thin]
+        T1 = np.load(prefix + '_T1_tot.npy')[::thin]
+        samples.append(T0 * dlam1[index] + T1 * dlam2[index])
+    samples = np.array(samples)
+
+    entropy = integrate_paper(np.sum(samples, axis=1) / len(samples[0]),
+                              path_points)
+
+    size = len(samples[0]) // n_blocks
+    blocks = np.zeros(n_blocks)
+    for i in range(n_blocks):
+        blocks[i] += integrate_paper(np.sum(samples[:, i * size :
+                                     (i + 1) * size], axis=1) / size,
+                                     path_points)
+    average = np.sum(blocks) / n_blocks
+    spread = np.sqrt(np.sum((blocks - average) ** 2) / n_blocks)
+    return entropy, spread / np.sqrt(n_blocks)
