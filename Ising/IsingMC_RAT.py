@@ -31,7 +31,6 @@ are saved. The default parameters that I use are:
     sampling_offset = 0
     renyi_order = 2
     n_walkers = 5
-    LONG = (60 * n_steps - start) // sampling_interval
 
 """
 
@@ -43,8 +42,7 @@ from timeit import default_timer as timer
 from multiprocessing import Process
 import multiprocessing as mp
 
-from IsingMC_main_cluster import cluster_monte_carlo
-from IsingMC_main_cluster import run_integral, run_ratio
+from IsingMC_main_cluster import run_ratio
 
 print("Number of processors: ", mp.cpu_count())
 
@@ -76,7 +74,6 @@ def main(args):
     sampling_offset = 0
     renyi_order = 2 # Must be set to 2
     n_walkers = 5
-    LONG = (60 * n_steps - start) // sampling_interval
 
     n_points = int(args[8])
     saveto = args[9]
@@ -147,8 +144,9 @@ def main(args):
           entropy = np.log2(ratio) / 2
           entropy_two = np.log2(ratio_two)
 
-          # errors for different SWAP opperators, based on the variance
-          # of the walkers
+          # errors for different SWAP opperators: the spread (standard
+          # deviation) of the walker averages, not the standard error of
+          # their mean
           err1 = np.sqrt(np.sum([(ratio1 - swap1[i]) ** 2
                                      for i in range(n_walkers)]) / n_walkers)
           err2 = np.sqrt(np.sum([(ratio2 - swap2[i]) ** 2

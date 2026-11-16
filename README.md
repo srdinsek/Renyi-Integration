@@ -29,7 +29,7 @@ The parameters define:
 - `zeta` - imaginary-time step $\zeta = \beta / M$, where $M$ is the number of beads per replica. The program sets $M$ = `int(beta / zeta)` and then resets $\zeta = \beta / M$, so that $M$ is an integer.
 - `n_spins` - number of spins
 - `r_min, r_max, n_fields` - specifies the magnetic fields used. Means: `numpy.linspace(r_min, r_max, n_fields)`
-- `n_steps` - number of steps in [Wolff cluster algorithm](https://en.wikipedia.org/wiki/Wolff_algorithm)
+- `n_steps` - number of steps in [Wolff cluster algorithm](https://en.wikipedia.org/wiki/Wolff_algorithm). Because clusters are larger at small `r`, the program multiplies `n_steps` by 60 for `r > 3` and by 10 for `1 < r <= 3`, and records observables every 10 steps for `r < 1`.
 - `subsystem` ('full' or 'half') - specifies if in thermodynamic integration full entropy or entanglement entropy of the half should be evaluated
 - `n_points` - number of integration steps (thermodynamic integration, there is no actual integration in Monte Carlo algorithm) in thermodynamic integration and number of intermediate states when measuring *SWAP*. Equals the number of processors used.
 - `saveto` - folder where all results are saved
@@ -66,7 +66,7 @@ Parameters defined below can be modified, others are redundant, or shouldn't be 
 - `partition2` - specifies the trial size starting from particle 0.
 - `n_steps` - number of steps in [Metropolis algorithm](https://en.wikipedia.org/wiki/Metropolis–Hastings_algorithm)
 - `start` - when to start sampling the observable
-- `class_move_number` - every class_move_number step, move with reflecting the positions of the copies is proposed
+- `reflection_interval` - every reflection_interval step, move with reflecting the positions of the copies is proposed
 - `sampling_interval` - every sampling_interval step observables are recorded
 - `dimension` - how many particles there are
 - `random_seed` - seed for random numbers

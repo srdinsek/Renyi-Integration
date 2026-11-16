@@ -29,7 +29,6 @@ The default parameters that I use are:
     sampling_offset = 0
     renyi_order = 2
     n_walkers = 5
-    LONG = (60 * n_steps - start) // sampling_interval
 
 """
 
@@ -41,8 +40,7 @@ from timeit import default_timer as timer
 from multiprocessing import Process
 import multiprocessing as mp
 
-from IsingMC_main_cluster import cluster_monte_carlo
-from IsingMC_main_cluster import run_integral, run_ratio
+from IsingMC_main_cluster import run_integral
 
 print("Number of processors: ", mp.cpu_count())
 
@@ -76,7 +74,6 @@ def main(args):
     sampling_offset = 0
     renyi_order = 2 # Must be set to 2
     n_walkers = 5
-    LONG = (60 * n_steps - start) // sampling_interval
 
 
     n_points = int(args[9])
@@ -148,7 +145,8 @@ def main(args):
           # kinetic energy of the two springs forming joint ensemble
           t1 = np.sum(T1_walkers) / len(T1_walkers)
 
-          # error-bars of energies, based on the variance of the walkers
+          # error-bars of energies: the spread (standard deviation) of
+          # the walker averages, not the standard error of their mean
           err0 = np.sqrt(np.sum([(t0 - T0_walkers[i]) ** 2
                                      for i in range(n_walkers)]) / n_walkers)
           err1 = np.sqrt(np.sum([(t1 - T1_walkers[i]) ** 2

@@ -26,9 +26,8 @@ use of numba's decorator @njit.
 
 import os
 import numpy as np
-from numba import jit, njit
-from numpy.random import rand,randint,normal,uniform,seed
-import math
+from numba import njit
+from numpy.random import randint,seed
 
 from IsingMC_main_lib import expand_cluster,observable,kinetic_ab
 
@@ -83,7 +82,9 @@ def cluster_monte_carlo(betaJ, zeta, n_spins, r, initial_state, initial_seed,
         observable_id = 1
 
     # Because clusters are biger at small r, we
-    # make less moves
+    # make less moves. Hence n_steps given as argument is multiplied
+    # by 60 for r > 3 and by 10 for 1 < r <= 3, and the sampling
+    # interval is set to 10 for r < 1.
     if r > 3:
         n_steps = n_steps * 60
     elif r > 1:
@@ -107,8 +108,9 @@ def cluster_monte_carlo(betaJ, zeta, n_spins, r, initial_state, initial_seed,
     p_boundary1 = 1 - np.exp(-2 * time_coupling * lam0)
     # link2 in imag.-time at the boundary
     p_boundary2 = 1 - np.exp(-2 * time_coupling * lam1)
-    n_slices = 2 * n_beads # assumed renyi_order = 2
-    n_sites = 2 * n_beads * n_spins # assumed renyi_order = 2
+    # only renyi_order = 2 is supported
+    n_slices = renyi_order * n_beads
+    n_sites = renyi_order * n_beads * n_spins
     print(ch, sh, time_coupling)
 
     # initial state for each walker
@@ -118,7 +120,7 @@ def cluster_monte_carlo(betaJ, zeta, n_spins, r, initial_state, initial_seed,
     else:
         seed(0)
         state = randint(0, 2, (n_walkers, n_spins,
-                               2 * n_beads)).astype(np.bool_)
+                               n_slices)).astype(np.bool_)
 
     # counts number of sample points for each walker
     n_used = np.zeros(n_walkers, dtype=np.int64)
@@ -142,13 +144,11 @@ def cluster_monte_carlo(betaJ, zeta, n_spins, r, initial_state, initial_seed,
           (n_steps - start) // sampling_interval), dtype=np.float64)
 
     # some arrays that help reducing memorry used
-    q = np.zeros((2 * n_beads), dtype=np.bool_)
     cluster_sites = np.zeros((n_walkers, n_sites, 2), dtype=np.int64)
     cluster_ids = np.zeros((n_walkers, n_sites), dtype=np.int64)
     pocket = np.zeros((n_walkers, n_sites), dtype=np.int64)
 
     # Parameters used for the cluster algortihm
-    DE = 0
     total_cluster_size = 0
 
     # We start the Metropolis loop

@@ -3,10 +3,8 @@ This is a library of functions that are used by the Wolff
 cluster algorithm and heat-bath algorithm.
 '''
 
-import math
-import numba
 import numpy as np
-from numba import jit, njit
+from numba import njit
 from numpy.random import rand
 
 
@@ -108,7 +106,6 @@ def expand_cluster(n_spins, n_beads, n_slices, time_coupling, p_space, p_time,
     vertical and horisontal dimension is split. Because the neighbouring
     spins in the same bead interact only by the potential term and are
     not affected by the boundary condition.  '''
-    current_id = pocket[pocket_size - 1]
     pocket[pocket_size - 1] = 0
     pocket_size -= 1
 

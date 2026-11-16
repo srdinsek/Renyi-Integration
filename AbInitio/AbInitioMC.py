@@ -23,11 +23,9 @@ DISLOC - if realistic potential is used, the address of it's grid
 """
 
 import numpy as np
-import numba
-from numba import jit, njit
-from numpy.random import rand,randint,normal,uniform,seed,permutation
+from numba import njit
+from numpy.random import rand,randint,normal,uniform,seed
 import os
-import math
 import pickle
 from scipy.interpolate import bisplrep, bisplev
 
@@ -37,7 +35,7 @@ DISLOC = os.path.join(HERE, "distances.npy")
 
 @njit(error_model="numpy")
 def initial_energy(path, b, b2, v1, v2, n_beads, partition1, partition2,
-                   mass, mu, lamda, potential_kind, B, potential, coor, dk,
+                   mass, mu, lamda, potential_kind, potential, coor, dk,
                    lam1, lam2, c1, c2, potential_correction):
     '''This function evaluates full energy at the begining of the
     MC simulation. '''
@@ -66,19 +64,19 @@ def initial_energy(path, b, b2, v1, v2, n_beads, partition1, partition2,
 
         # This terms is used ony if potential_correction == True
         if i % n_beads == 0 and potential_correction == True:
-           V += potential_energy(b, mu, lamda, potential_kind, B,
+           V += potential_energy(b, mu, lamda, potential_kind,
                                  potential, coor, dk) / 2
 
            b[:partition1] = path[:partition1, i - n_beads]
-           V += potential_energy(b, mu, lamda, potential_kind, B,
+           V += potential_energy(b, mu, lamda, potential_kind,
                            potential, coor, dk) / 2 * c1
 
            b[partition1 :partition2] = path[partition1 :partition2,
                                             i - n_beads]
-           V += potential_energy(b, mu, lamda, potential_kind, B,
+           V += potential_energy(b, mu, lamda, potential_kind,
                            potential, coor, dk) / 2 * c2
         else:
-           V += potential_energy(b, mu, lamda, potential_kind, B,
+           V += potential_energy(b, mu, lamda, potential_kind,
                                  potential, coor, dk)
     K1 = kinetic_part1
     K2 = kinetic_part2
@@ -87,8 +85,7 @@ def initial_energy(path, b, b2, v1, v2, n_beads, partition1, partition2,
     return V, K1, K2, E01, E02
 
 @njit(error_model="numpy")
-def potential_energy(vector, mu, lamda, potential_kind, B, potential, coor,
-                     dk):
+def potential_energy(vector, mu, lamda, potential_kind, potential, coor, dk):
     '''Potential energy of the configuration. This function can be
     changed baased on the needs.'''
 
@@ -148,7 +145,8 @@ def sample_replicas(beta, zeta, lam1, lam2, renyi_order, mass, mu, lamda,
                     shift, partition1, partition2, n_steps, epsilon,
                     start, random_seed, sampling_offset, sampling_interval,
                     state, potential, coor, dk, dimension=1, memory=False,
-                    position=False, random_state=True, potential_kind=1):
+                    position=False, random_state=True, potential_kind=1,
+                    reflection_interval=100):
     '''This is the function that simulates the ensembles that gives
     the Rényi entanglement entropy. Parameter ´partition1´ specifies
     the number of joint copies starting from particle 0. Zero means there
@@ -161,7 +159,10 @@ def sample_replicas(beta, zeta, lam1, lam2, renyi_order, mass, mu, lamda,
     (partition2 - 1). The function with parameters partition2=0, partition1
     simulates ensemlbe, where copies spanning from particle 0 to particle
     (partition1 - 1) are joined. Parameter ´potential_kind´ selects the
-    potential: 0 for analytic, 1 for realistic 2D (linear interpolation).'''
+    potential: 0 for analytic, 1 for realistic 2D (linear interpolation).
+    Every reflection_interval steps the reflection of the replica is
+    proposed instead of a single-bead move. Only renyi_order = 2 is
+    supported.'''
 
     # zeta - beta / n_beads
     # epsilon - define the variance of random numbers
@@ -181,8 +182,6 @@ def sample_replicas(beta, zeta, lam1, lam2, renyi_order, mass, mu, lamda,
     #-------------------------------------------
 
     potential_correction = False
-    B = 4 * 40 * 0.1 ** 6
-    epsilon_class = 1 / epsilon
     n_beads = max(int(beta / zeta), 3)
     path_length = n_beads * renyi_order
     print('M : ', n_beads)
@@ -219,8 +218,6 @@ def sample_replicas(beta, zeta, lam1, lam2, renyi_order, mass, mu, lamda,
             path = np.copy(state)
 
         # Some arrays used during the calcualtion
-        path_new = np.zeros((dimension, n_beads * renyi_order),
-                            dtype=np.float64)
         b = np.zeros(dimension, dtype=np.float64)
         b2 = np.zeros(dimension, dtype=np.float64)
         v1 = np.zeros(dimension, dtype=np.float64)
@@ -231,7 +228,7 @@ def sample_replicas(beta, zeta, lam1, lam2, renyi_order, mass, mu, lamda,
         #-------------------------------------------
         V, K1, K2, E01, E02 = initial_energy(path, b, b2, v1, v2, n_beads,
                                          partition1, partition2, mass,
-                                         mu, lamda, potential_kind, B,
+                                         mu, lamda, potential_kind,
                                          potential, coor, dk, lam1, lam2,
                                          c1, c2, potential_correction)
 
@@ -275,7 +272,7 @@ def sample_replicas(beta, zeta, lam1, lam2, renyi_order, mass, mu, lamda,
         for step in range(1, n_steps + 1):
 
             # Just slightly perturb one random bead
-            if step % 100 != 0:
+            if step % reflection_interval != 0:
                 displacement.fill(0)
 
                 # create perturbation for each copy
@@ -315,33 +312,33 @@ def sample_replicas(beta, zeta, lam1, lam2, renyi_order, mass, mu, lamda,
                        pot_q.fill(0)
                        pot_d.fill(0)
                        dV += (potential_energy(new_bead[:, al], mu, lamda,
-                                    potential_kind, B, potential, coor, dk) \
+                                    potential_kind, potential, coor, dk) \
                             - potential_energy(old_bead[:, al], mu, lamda,
-                                    potential_kind, B, potential, coor,
+                                    potential_kind, potential, coor,
                                     dk)) / 2
                        pot_q += new_bead[:, al]
                        pot_d += old_bead[:, al]
                        pot_q[:partition1] = path[:partition1, jj - n_beads]
                        pot_d[:partition1] = path[:partition1, jj - n_beads]
                        dV += (potential_energy(new_bead[:, al], mu, lamda,
-                                    potential_kind, B, potential, coor, dk) \
+                                    potential_kind, potential, coor, dk) \
                             - potential_energy(old_bead[:, al], mu, lamda,
-                                    potential_kind, B, potential, coor,
+                                    potential_kind, potential, coor,
                                     dk)) / 2 * c1
                        pot_q[partition1 :partition2] = path[
                                         partition1 :partition2, jj - n_beads]
                        pot_d[partition1 :partition2] = path[
                                         partition1 :partition2, jj - n_beads]
                        dV += (potential_energy(new_bead[:, al], mu, lamda,
-                                    potential_kind, B, potential, coor, dk) \
+                                    potential_kind, potential, coor, dk) \
                             - potential_energy(old_bead[:, al], mu, lamda,
-                                    potential_kind, B, potential, coor,
+                                    potential_kind, potential, coor,
                                     dk)) / 2 * c2
                     else:
                        dV += potential_energy(new_bead[:, al], mu, lamda,
-                                    potential_kind, B, potential, coor, dk) \
+                                    potential_kind, potential, coor, dk) \
                             - potential_energy(old_bead[:, al], mu, lamda,
-                                    potential_kind, B, potential, coor, dk)
+                                    potential_kind, potential, coor, dk)
 
                     #-------------------------------------------
                     # Change in the kinetic energy
@@ -431,7 +428,7 @@ def sample_replicas(beta, zeta, lam1, lam2, renyi_order, mass, mu, lamda,
                 previous_bead[:, 1] = path[:, 0]
 
                 # loop over copies
-                for al in range(2):
+                for al in range(renyi_order):
                     #====================ONLY_===========================
                     dK1 += (multi(mass, previous_bead[:, al]\
                                     - new_bead[:, al], reflection_mask)\
@@ -486,12 +483,12 @@ def sample_replicas(beta, zeta, lam1, lam2, renyi_order, mass, mu, lamda,
 
                     b[:partition1] = path[:partition1, al * n_beads - n_beads]
                     potential_part1 += potential_energy(b, mu, lamda,
-                                    potential_kind, B, potential, coor,
+                                    potential_kind, potential, coor,
                                     dk) / 2
                     b[partition1 :partition2] = path[\
                               partition1 :partition2, al * n_beads - n_beads]
                     potential_part2 += potential_energy(b, mu, lamda,
-                                    potential_kind, B, potential, coor,
+                                    potential_kind, potential, coor,
                                     dk) / 2
 
                 kinetic_difference = (kinetic_part2 - kinetic_part1)
@@ -530,15 +527,13 @@ def run_renyi(beta, zeta, lam1, renyi_order, mass, mu, lamda, shift,
               partition1, partition2, n_steps, epsilon, start, random_seed,
               sampling_offset, sampling_interval, dimension=1, memory=False,
               position=False, index=False, name='lam6_doublew', lam2=False,
-              real_index=10, potential_type='analytic', *, saveto):
+              real_index=10, potential_type='analytic', *, saveto,
+              reflection_interval=100):
 
     '''This function calls sample_replicas() and saves the
     results. In the case of realistic 2D potential it performs some
     spline interpolation, to make grid for linear interpolation denser.
     saveto is the folder where the results are saved.'''
-
-    if partition1 == False:
-        partition = partition2
 
     # these must be converted to numpy arrays
     mass = np.array(mass, dtype=np.float64)
@@ -559,12 +554,10 @@ def run_renyi(beta, zeta, lam1, renyi_order, mass, mu, lamda, shift,
         # Constants have to be evaluated like in the main function
         Mw = max(int(beta / zeta), 3)
         zetaw = beta / Mw
-        epsilonw = np.sqrt(zetaw)
 
         Mw = max(int(beta / zetaw), 3)
         print('M : ', Mw)
         zetaw = beta / Mw
-        muw, lamdaw, massw = mu * zetaw, lamda * zetaw, mass / zetaw
 
         # we load the realistic potential
         potentials = np.load(POTLOC)
@@ -594,7 +587,8 @@ def run_renyi(beta, zeta, lam1, renyi_order, mass, mu, lamda, shift,
                    epsilon, start, random_seed, sampling_offset,
                    sampling_interval, state, potential, coor, dk,
                    dimension=dimension, memory=memory, position=position,
-                   random_state=True, potential_kind=1)
+                   random_state=True, potential_kind=1,
+                   reflection_interval=reflection_interval)
 
     elif potential_type == 'analytic':
 
@@ -610,7 +604,8 @@ def run_renyi(beta, zeta, lam1, renyi_order, mass, mu, lamda, shift,
                    epsilon, start, random_seed, sampling_offset,
                    sampling_interval, state, potential, coor, dk,
                    dimension=dimension, memory=memory, position=position,
-                   random_state=True, potential_kind=0)
+                   random_state=True, potential_kind=0,
+                   reflection_interval=reflection_interval)
 
     #-------------------------------------------
     # Saving the results
@@ -651,7 +646,8 @@ def run_renyi(beta, zeta, lam1, renyi_order, mass, mu, lamda, shift,
               'random_seed': random_seed,
               'sampling_offset': sampling_offset,
               'sampling_interval': sampling_interval,
-              'dimension': dimension
+              'dimension': dimension,
+              'reflection_interval': reflection_interval
               }
 
     with open(prefix + '_args.p', 'wb') as fp:

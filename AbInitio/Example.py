@@ -22,7 +22,7 @@ in the terminal. The default parameters that I use are:
         start = 10 ** 6
         random_seed = 11
         sampling_offset = 5
-        class_move_number = 100
+        reflection_interval = 100
         sampling_interval = 1000
         renyi_order = 2
 """
@@ -78,16 +78,18 @@ def main(args):
         start = 10 ** 6
         random_seed = 11
         sampling_offset = 5
-        class_move_number = 100
+        reflection_interval = 100
         sampling_interval = 1000
         dimension=2
-        renyi_order = 2
+        renyi_order = 2 # only 2 is supported
         processes.append(Process(target=run_renyi, args=(beta, zeta, lam1,
                             renyi_order, mass, mu, lamda, shift, partition1,
                             partition2, n_steps, epsilon, start, random_seed,
                             sampling_offset, sampling_interval, dimension,
                             True, False, index, name, lam2, -10, 'realistic'),
-                            kwargs={'saveto': saveto}))
+                            kwargs={'saveto': saveto,
+                                    'reflection_interval':
+                                    reflection_interval}))
         index += 1
 
     for p in processes:
